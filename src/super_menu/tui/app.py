@@ -110,11 +110,11 @@ class SuperMenuApp(App):
             form.mount(inp)
         form.mount(Button("Run  (r)", variant="primary", id="run-btn"))
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-btn":
-            self.action_run()
+            await self.action_run()
 
-    def action_run(self) -> None:
+    async def action_run(self) -> None:
         if not self._current:
             return
         _plugin, command = self._current
@@ -124,12 +124,12 @@ class SuperMenuApp(App):
             if val != "":
                 raw[name] = val
         result = command.run(raw)
-        self._render_result(result)
+        await self._render_result(result)
 
     # ----- results rendering ------------------------------------------------
-    def _render_result(self, result: CommandResult) -> None:
+    async def _render_result(self, result: CommandResult) -> None:
         panel = self.query_one("#results", VerticalScroll)
-        panel.remove_children()
+        await panel.remove_children()
         if not result.ok:
             panel.mount(Static(f"[b red]error:[/] {result.summary}"))
             return
