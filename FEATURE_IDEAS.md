@@ -4,11 +4,22 @@
 
 This document captures ideas for improving super-menu to unlock new capabilities with the free-for-dev GitHub repository and beyond. The core vision: **make Claude Code a first-class citizen** of super-menu, allowing it to intelligently consume and contribute to resource data.
 
+The vision unfolds in two arcs:
+
+1. **Claude as consumer** — give Claude structured, queryable access to repo state and resource data so its advice gets better (git-tools, smart search, architecture analysis).
+2. **Claude as curator** — let Claude detect stale data and propose evidence-backed fixes upstream, with a human gatekeeper at every step (flags, proposals, PRs).
+
+Guiding principle throughout: **build the cheapest version that proves the value, then invest.** Fancy tech (embeddings, extraction pipelines) is earned by demonstrated need, not assumed up front.
+
 ---
 
 ## 1. git-tools Plugin
 
 An extensible git plugin that surfaces repository state and history as queryable tables. Enables Claude Code to understand repo context during architecture reviews and coding sessions.
+
+This is the **best first build**: pure metadata commands returning tables, zero UI code, useful on all three surfaces, and a second reference plugin that proves the plugin contract generalizes beyond free-for-dev.
+
+**Honest scoping note:** Claude Code can already run `git` directly via its shell. The MCP value here is mostly for *other* MCP clients and for the TUI/CLI surfaces (a git dashboard, structured JSON for scripting). That's still plenty — just don't oversell the Claude angle.
 
 ### Commands
 
@@ -52,87 +63,50 @@ An extensible git plugin that surfaces repository state and history as queryable
 
 **CLI**: Structured JSON output for scripting. Example: `super-menu git-tools log --author=bot --json | jq '.data | length'`
 
-**MCP**: Claude checks repo state while coding:
+**MCP**: Any MCP client checks repo state while coding:
 - "Am I on main or a feature branch?"
 - "How many commits are in this PR?"
 - "Is this branch safe to rebase?"
 
 ### Implementation Notes
 
-- Cache `log` for 30s, `branch` for 60s (avoid re-running expensive commands)
-- Use standard git flags (`--oneline`, `--pretty=format:`) for portable output
+- **No caching.** Local git commands run in milliseconds; caching adds staleness bugs for no measurable gain. Revisit only if a command is proven slow on a monster repo.
+- Use plumbing/stable formats (`git status --porcelain`, `--pretty=format:`) — never parse human-readable output
 - Assume `.git/` exists in cwd; error gracefully if not
-- Use `git status --porcelain` (stable API) instead of human-readable output
 - On Windows: use `pathlib` for all path handling
 
 ---
 
-## 2. Enhanced free-for-dev: Semantic Search & RAG
+## 2. Enhanced free-for-dev: Smart Discovery
 
 Transform free-for-dev from substring search into intelligent resource discovery. Claude can find alternatives even when terminology differs.
 
-### Core Improvements
+**Key insight:** when queries arrive via MCP, *Claude itself is the semantic layer.* It can rephrase "find alternatives to Postgres" into good keyword + category queries without any embeddings. So the discovery features below are ordered keyword-first, with embeddings as a deliberate later upgrade — not a prerequisite.
 
-#### A. Semantic Search / RAG Layer
+### A. Keyword + Category Search Upgrade (build first)
 
-- Embed free-for-dev entries (name + description) using embeddings
-- Cache embeddings locally (deterministic + expensive to re-compute)
-- When Claude queries "database service with free tier", get semantically similar results
-- Unlock: "find alternatives to Postgres" without saying "Postgres"
+- Tokenized multi-term matching over name + description + category (not raw substring)
+- Category-aware ranking (a "Database" query boosts the DBaaS section)
+- Synonym map for common aliases ("postgres" → "PostgreSQL", "auth" → "Authentication")
+- Cheap, dependency-free, and — for a corpus of ~1,500 short entries — likely 80% of the value
 
-**Implementation:**
-- Use OpenAI's `text-embedding-3-small` or open model (e.g., `sentence-transformers`)
-- Store embeddings in `~/.super-menu/plugins/free-for-dev/embeddings.json`
-- Only update when free-for-dev index is refreshed
-
-#### B. Structured Extraction from free-for-dev
-
-- Currently: `name | description | category | url`
-- Extract: **free tier limits, data residency, support level, integrations, pricing tier**
-- Parse descriptions to build a structured schema
-
-**Example:**
-```json
-{
-  "name": "Supabase",
-  "category": "Database",
-  "free_tier": {
-    "storage_gb": 500,
-    "monthly_credits": null,
-    "api_calls_unlimited": true,
-    "data_residency": "US only"
-  },
-  "integrations": ["Prisma", "TypeORM", "Next.js"],
-  "pricing_tiers": ["free", "pro", "enterprise"]
-}
-```
-
-#### C. Architecture Document Analyzer
-
-**New command:** `analyze-architecture <path-to-doc>`
-
-- Reads markdown/YAML architecture docs
-- Extracts technology mentions: "PostgreSQL", "Auth0", "Stripe", etc.
-- Looks up each in free-for-dev, suggests alternatives
-- Returns structured data: `{ technology: "Auth0", mentioned: true, free_alternatives: [...] }`
-
-**Use case:** Claude reviews your architecture and flags paid services with free alternatives.
-
-#### D. Claude-Native MCP Interface
+### B. `suggest-alternatives` — Claude-Native MCP Interface
 
 New command: `suggest-alternatives(technology, criteria)`
 
 ```python
 def cmd_suggest_alternatives(technology: str, criteria: str | None = None) -> CommandResult:
     """Find free alternatives to a named service.
-    
+
     Params:
     - technology: "PostgreSQL", "Auth0", etc.
     - criteria: optional constraints ("data EU-only", "open-source required")
-    
+
     Returns: ranked list of alternatives with reasoning
     """
 ```
+
+Backed by the keyword layer in (A): map the named technology to its category, return the category's entries ranked by criteria-term matches. Claude does the qualitative tradeoff analysis on top.
 
 **Example flow:**
 ```
@@ -142,7 +116,18 @@ Claude: "I see you're using Auth0. Let me check free alternatives..."
 → Claude: "Keycloak is self-hosted and free. Firebase gives you managed + free tier. Here's the tradeoff..."
 ```
 
-#### E. Multi-source & Custom Categories
+### C. Architecture Document Analyzer
+
+**New command:** `analyze-architecture <path-to-doc>`
+
+- Reads markdown/YAML architecture docs
+- Extracts technology mentions: "PostgreSQL", "Auth0", "Stripe", etc.
+- Looks up each in free-for-dev (via the keyword layer), suggests alternatives
+- Returns structured data: `{ technology: "Auth0", mentioned: true, free_alternatives: [...] }`
+
+**Use case:** Claude reviews your architecture and flags paid services with free alternatives.
+
+### D. Annotations: Personal Overlay (cheap, high value)
 
 - Allow users to tag/annotate resources: "⭐ we use this in prod", "❌ don't recommend"
 - Build personal overlay on top of free-for-dev data
@@ -152,9 +137,24 @@ Claude: "I see you're using Auth0. Let me check free alternatives..."
 ```
 ~/.super-menu/plugins/free-for-dev/
 ├── index.json
-├── embeddings.json
 └── annotations.json  # user tags + ratings
 ```
+
+### E. Semantic Search / Embeddings (deferred — earn it)
+
+If, after (A)–(C) ship, real queries demonstrably miss relevant entries, add an embedding layer:
+
+- Prefer a small local model (e.g., `sentence-transformers`) as an **optional extra** (`pip install super-menu[semantic]`) — a paid OpenAI key as a hard dependency of a free-tools plugin is off-brand and a setup barrier
+- Cache embeddings in `~/.super-menu/plugins/free-for-dev/embeddings.json`; recompute only when the index refreshes
+- Ship with a benchmark: a file of ~20 real queries with expected hits, so "embeddings beat keywords" is measured, not assumed
+
+### F. Structured Extraction (deferred — highest risk)
+
+Extracting structured facts (free tier limits, data residency, pricing tiers) from free-for-dev's freeform prose descriptions is lossy and goes stale the moment a vendor changes pricing. Treat it as an experiment, not a foundation:
+
+- Start with 2–3 fields that are usually stated explicitly (e.g., "open-source", "credit card required")
+- Every extracted fact carries `extracted_at` + source text, and the UI displays it as "as described in free-for-dev on <date>" — never as ground truth
+- Expand the schema only for fields where extraction accuracy holds up
 
 ---
 
@@ -162,7 +162,11 @@ Claude: "I see you're using Auth0. Let me check free alternatives..."
 
 Allow Claude to mark entries as problematic and propose fixes, with you as the gatekeeper.
 
-### How It Works
+### Quick Win First: `check-links`
+
+Before any flagging machinery exists, ship a standalone `check-links` command: crawl entry URLs, report 404s/redirects as a table. It's the one **objectively verifiable, high-confidence signal** in the whole curation arc, it's useful on day one from all three surfaces, and it later becomes the highest-confidence input to the flag pipeline.
+
+### How Flagging Works
 
 **New command:** `flag-entry(entry_name, reason, severity)`
 
@@ -208,11 +212,17 @@ Only auto-propose if confidence > 0.8:
 - `pricing_changed` + evidence: 0.7
 - Unverified claim: 0.3
 
+**Note:** flags are valuable *locally* even if nothing is ever sent upstream — "this entry is stale" context improves Claude's recommendations immediately. Upstream contribution (§4–5) is a bonus layer, not the justification.
+
 ---
 
 ## 4. Draft PR Workflow with Human-in-the-Loop
 
 Claude proposes PRs back to free-for-dev, but you stay in control.
+
+### Gate Before Building: Validate Upstream Fit
+
+This arc's payoff depends on free-for-dev maintainers actually accepting these PRs. **Before Phase 4+, do a cheap reality check:** read their CONTRIBUTING.md, scan recent PR acceptance patterns and review latency, and ideally submit one hand-crafted fix PR to see how it lands. If upstream is slow or hostile to this style of contribution, stop at local flags (§3) — they carry most of the personal value anyway.
 
 ### New Command
 
@@ -247,12 +257,17 @@ Claude proposes PRs back to free-for-dev, but you stay in control.
 - Plugin needs `GITHUB_TOKEN` (with `repo:free-for-dev-org/free-for-dev` scope)
 - Creates PRs under your user account (not anonymous)
 - Links PR back to the flag + evidence
+- **Fallback that ships first:** generate the PR as markdown + a `gh pr create` command you run yourself. Full API integration is a convenience layer on top, not a prerequisite.
 
 ---
 
 ## 5. PR Proposal Review Panel
 
 A dedicated TUI interface for reviewing Claude's PR proposals. **Markdown is not a good format for non-technical users**—this panel makes it approachable.
+
+### Architectural Note (read before building)
+
+This is the first feature that breaks the "surfaces auto-render from plugin metadata" rule: a review panel with radio options, evidence links, and multi-step approval can't be expressed as a `Command` + `CommandResult` table. Building it means **extending the core surface contract** (e.g., a new result kind like `CommandResult.review(...)` that the TUI knows how to render richly, while CLI/MCP degrade to structured JSON). Design that contract extension deliberately — it's a core change, not a plugin change, and it should stay generic enough that a second plugin could use it.
 
 ### Design Principles
 
@@ -337,36 +352,42 @@ class Evidence:
 
 ## Implementation Roadmap
 
-### Phase 1: Semantic Search Foundation
-- [ ] Add embedding + semantic search to free-for-dev plugin
-- [ ] Cache embeddings locally
+Reordered by effort-vs-payoff: quick, low-risk wins first; speculative tech and upstream-dependent work gated behind validation.
+
+### Phase 1: git-tools Plugin
+- [ ] Implement git-tools plugin with core commands (status, log, branch, diff-stats first)
+- [ ] Verify it works cleanly on all three surfaces (proves the contract generalizes)
+- [ ] Add remaining commands (tag, stash, blame)
+
+### Phase 2: Smart Discovery (keyword-first)
+- [ ] Upgrade free-for-dev search: tokenized matching, category ranking, synonym map
+- [ ] Implement `suggest-alternatives` MCP interface on top of it
 - [ ] Implement `analyze-architecture` command
+- [ ] Add annotations overlay (`annotations.json`)
 
-### Phase 2: Structured Data Extraction
-- [ ] Parse free-for-dev descriptions → extract free tier limits, data residency, etc.
-- [ ] Update plugin data model to include structured metadata
-- [ ] Implement `suggest-alternatives` MCP interface
+### Phase 3: Freshness Signals
+- [ ] Ship standalone `check-links` command (404/redirect report)
+- [ ] Build flagging system (`flag-entry` command, local storage)
+- [ ] Add confidence scoring; wire `check-links` results in as high-confidence flags
 
-### Phase 3: Flagging & Detection
-- [ ] Build flagging system (`flag-entry` command)
-- [ ] Add confidence scoring
-- [ ] Implement automatic URL checks (404 detection)
+### Phase 4: Upstream Validation Gate
+- [ ] Review free-for-dev contribution norms + recent PR acceptance/latency
+- [ ] Submit one hand-crafted fix PR from `check-links` findings; observe how it lands
+- [ ] Go/no-go decision on Phases 5–6 based on the result
 
-### Phase 4: PR Proposal Interface
-- [ ] Design + build PR Proposal Review Panel in TUI
-- [ ] Implement `propose-pr` command
-- [ ] Build approval workflow (options selection, change requests)
+### Phase 5: PR Proposal Interface (if gate passes)
+- [ ] Design the core contract extension for rich review results (deliberately, as a core change)
+- [ ] Build PR Proposal Review Panel in TUI
+- [ ] Implement `propose-pr` command + approval workflow
+- [ ] Markdown-draft + `gh pr create` fallback ships first
 
-### Phase 5: GitHub Integration
-- [ ] Add GitHub auth + PR creation
-- [ ] Generate markdown PRs from user-chosen options
-- [ ] Build PR preview interface
-- [ ] Audit trail + submission history
+### Phase 6: GitHub Integration (if gate passes)
+- [ ] Add GitHub auth + in-app PR creation
+- [ ] PR preview interface, audit trail, submission history
 
-### Phase 6: git-tools Plugin (Bonus)
-- [ ] Implement git-tools plugin with core commands
-- [ ] Add MCP interface for Claude Code
-- [ ] Cache strategy for performance
+### Deferred (earn with evidence)
+- [ ] Semantic search/embeddings — only if a query benchmark shows keyword search missing real hits; local model as optional extra
+- [ ] Structured extraction — start with 2–3 explicitly-stated fields, always dated + source-attributed
 
 ---
 
@@ -405,3 +426,4 @@ Better data in free-for-dev
 - User stays in control. Claude proposes, you approve. No auto-submissions.
 - Keeps a local audit trail so you can see what Claude has flagged and what you approved.
 - Focus on objective criteria (free tier removed, pricing changed, URL broken) not subjective opinions.
+- Build the cheapest version that proves the value; upgrade with evidence, not optimism.
