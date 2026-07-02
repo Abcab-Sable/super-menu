@@ -7,8 +7,8 @@ self-contained: goal, file layout, command specs against the real plugin contrac
 | Plan | Feature | Depends on | Status |
 |------|---------|------------|--------|
 | [01-git-tools](01-git-tools.md) | git-tools plugin | — | **Closed** — tranche 1 shipped ([PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)); tranche 2 cancelled; plugin reframed as the subprocess-backed reference example |
-| [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | **Next up** (low risk) |
-| [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | Planned (medium risk) |
+| [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | **Shipped** ([PR #7](https://github.com/Abcab-Sable/super-menu/pull/7)) |
+| [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | **Shipped** (check-links, flag-entry, flags, dismiss-flag) |
 | [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | Planned (process, not code) |
 | [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | Gated (high risk) |
 
