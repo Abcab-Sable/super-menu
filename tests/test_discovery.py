@@ -78,10 +78,22 @@ def test_regression_substring_matches_still_returned():
         return (q in entry["name"].lower() or q in entry["description"].lower()
                 or q in entry["category"].lower())
 
-    for query in ["postgres", "identity", "database", "delivery", "auth0", "email"]:
+    for query in ["postgres", "identity", "database", "delivery", "auth0",
+                  "email", "free", "tier"]:
         old = {e["name"] for e in FIXTURE if old_matches(e, query)}
         new = {e["name"] for _, e in search.search(FIXTURE, query, limit=0)}
         assert old <= new, f"query {query!r}: lost {old - new}"
+
+
+def test_stopword_only_query_falls_back_to_substring():
+    # "and" tokenizes to nothing (stopword) — the old substring search returned
+    # everything containing it, so the fallback must too, not zero rows.
+    names = {e["name"] for _, e in search.search(FIXTURE, "and", limit=0)}
+    expected = {
+        e["name"] for e in FIXTURE
+        if "and" in f"{e['name']} {e['category']} {e['description']}".lower()
+    }
+    assert names == expected and names, names
 
 
 # --- suggest-alternatives -------------------------------------------------
@@ -100,6 +112,16 @@ def test_suggest_unknown_technology_errs():
     res = plugin.cmd_suggest_alternatives("Nonexistotron9000")
     assert not res.ok
     assert "category" in res.summary  # hint to pass the override
+
+
+def test_category_override_does_not_overexclude_generic_name():
+    # Explicit override with a generic anchor ("auth") must not substring-drop
+    # every provider whose name contains it (FusionAuth, Auth0, …).
+    _reset_annotations()
+    res = plugin.cmd_suggest_alternatives("auth", category="Authentication")
+    assert res.ok
+    names = {r["name"] for r in res.data}
+    assert {"FusionAuth", "Auth0", "Okta", "Keycloak"} <= names, names
 
 
 def test_suggest_criteria_reranks():
@@ -139,6 +161,22 @@ def test_analyze_detects_known_ignores_unknown_and_common_words():
     assert isinstance(row["alternatives_detail"], list)
 
 
+def test_analyze_ignores_generic_synonym_words():
+    # Generic prose ("email", "metrics", "queue") are synonym keys but NOT
+    # abbreviations — they must not fabricate a detected technology.
+    doc = "We send email alerts and track metrics for every queue."
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False,
+                                     encoding="utf-8") as fh:
+        fh.write(doc)
+        path = fh.name
+    try:
+        res = plugin.cmd_analyze_architecture(path)
+    finally:
+        os.unlink(path)
+    assert res.ok
+    assert res.data == [], res.data
+
+
 # --- annotations ----------------------------------------------------------
 
 def test_annotation_shows_in_search_column():
@@ -148,6 +186,31 @@ def test_annotation_shows_in_search_column():
     row = next(r for r in res.data if r["name"] == "Auth0")
     assert "annotation" in row
     assert row["annotation"] and "star" in row["annotation"]
+
+
+def test_annotate_resolves_case_insensitively():
+    _reset_annotations()
+    res = plugin.cmd_annotate("auth0", tag="star", note="we use this")
+    assert res.ok and res.data["name"] == "Auth0", res.data
+    shown = plugin.cmd_search("Auth0").data
+    row = next(r for r in shown if r["name"] == "Auth0")
+    assert row["annotation"], row  # nudge is visible because it landed on canonical
+    _reset_annotations()
+
+
+def test_annotate_unknown_name_errs_with_suggestion():
+    _reset_annotations()
+    res = plugin.cmd_annotate("Okt", tag="star")
+    assert not res.ok
+    assert "Okta" in res.summary, res.summary
+
+
+def test_annotate_clear_orphan_name_ok():
+    # Clearing bypasses resolution so a stale annotation on a renamed entry
+    # stays deletable even though the name no longer resolves.
+    _reset_annotations()
+    res = plugin.cmd_annotate("GhostServiceXYZ")
+    assert res.ok, res.summary
 
 
 def test_avoid_tag_sinks_rank():
@@ -166,10 +229,16 @@ if __name__ == "__main__":
     test_exact_name_outranks_description()
     test_synonym_query_finds_entry()
     test_regression_substring_matches_still_returned()
+    test_stopword_only_query_falls_back_to_substring()
     test_suggest_anchor_category_resolution()
     test_suggest_unknown_technology_errs()
+    test_category_override_does_not_overexclude_generic_name()
     test_suggest_criteria_reranks()
     test_analyze_detects_known_ignores_unknown_and_common_words()
+    test_analyze_ignores_generic_synonym_words()
     test_annotation_shows_in_search_column()
+    test_annotate_resolves_case_insensitively()
+    test_annotate_unknown_name_errs_with_suggestion()
+    test_annotate_clear_orphan_name_ok()
     test_avoid_tag_sinks_rank()
     print("all discovery tests passed")

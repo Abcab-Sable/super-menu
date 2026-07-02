@@ -25,7 +25,17 @@ _IGNORE_NAMES = {
     "files", "notes", "free", "tools", "docs", "apps", "api", "apis", "cloud",
     "data", "email", "mail", "host", "hosting", "text", "images", "web", "site",
     "app", "code", "test", "tests", "build", "deploy", "static", "search",
+    # Entry names that are also everyday English verbs/nouns — a bare mention in
+    # a doc ("expose the port", "monitor usage") is prose, not a tech choice.
+    "expose", "monitor", "deliver", "connect", "sync", "share", "forward",
 }
+
+# Abbreviations that unambiguously stand for a technology when they appear in a
+# document, so ``analyze-architecture`` may resolve them to their best entry.
+# Deliberately excludes the generic query-expansion synonym keys (auth, email,
+# queue, metrics, logs, sso, cdn, …): those are ordinary prose and resolving
+# them would fabricate a "detected technology" from any architecture doc.
+_ABBREV_SYNONYMS = {"k8s", "postgres", "postgresql", "psql", "cicd"}
 
 _SEARCH_COLUMNS = ["name", "category", "url", "description", "annotation"]
 
@@ -106,26 +116,44 @@ def cmd_category(name: str, limit: int = 50) -> CommandResult:
     )
 
 
+def _is_excluded(name: str, exclude: str, exclude_tokens: set[str],
+                 substring: bool) -> bool:
+    """Whether ``name`` is the named technology itself and should be dropped.
+
+    On the name-anchored path substring exclusion is right ("PostgreSQL" drops
+    "PostgreSQL Hosting Co"). On an explicit ``category`` override it over-
+    excludes — a generic anchor like "auth" would wipe out FusionAuth, Auth0,
+    Authentik — so there we require exact equality or a whole-token match.
+    """
+    if name == exclude:
+        return True
+    if substring:
+        return bool(exclude) and exclude in name
+    return bool(exclude_tokens & set(search.tokenize(name)))
+
+
 def _rank_candidates(entries: list[dict], in_category, exclude: str,
                      criteria: str | None, anns: dict[str, dict],
-                     limit: int) -> list[tuple[float, dict]]:
+                     limit: int, exclude_substring: bool = True) -> list[tuple[float, dict]]:
     """Rank entries within an anchor category by optional ``criteria``.
 
     ``in_category`` is a predicate selecting the candidate pool; ``exclude`` is
-    the named technology itself (dropped by name match). Criteria tokens are
-    scored against each candidate (name/category/description); annotation tags
-    nudge the result. With no criteria, ordering is annotation-then-name.
+    the named technology itself (dropped — see :func:`_is_excluded`). Criteria
+    tokens are scored against each candidate (name/category/description);
+    annotation tags nudge the result. With no criteria, ordering is
+    annotation-then-name.
     """
     crit_tokens = search.tokenize(criteria) if criteria else []
     crit_expanded = search.expand(crit_tokens) if crit_tokens else set()
     ex = exclude.lower().strip()
+    ex_tokens = set(search.tokenize(ex))
 
     cands: list[tuple[float, dict]] = []
     for e in entries:
         if not in_category(e):
             continue
         nm = e["name"].lower()
-        if ex and (nm == ex or ex in nm):
+        if ex and _is_excluded(nm, ex, ex_tokens, exclude_substring):
             continue
         base = search.score(e, crit_tokens, crit_expanded) if crit_tokens else 0.0
         base += annotations.score_adjust(e["name"], anns)
@@ -166,6 +194,9 @@ def cmd_suggest_alternatives(technology: str, criteria: str | None = None,
         cl = category.lower()
         in_category = lambda e: cl in e["category"].lower()  # noqa: E731
         anchor = category
+        # A generic override anchor ("auth") must not substring-exclude every
+        # provider containing it — require exact/token exclusion instead.
+        exclude_substring = False
     else:
         # Anchor only on a genuine *name* match — a mere description hit (of
         # which the 1.5k-entry index always has some) is not enough to trust the
@@ -178,8 +209,10 @@ def cmd_suggest_alternatives(technology: str, criteria: str | None = None,
             )
         anchor = anchored["category"]
         in_category = lambda e: e["category"] == anchor  # noqa: E731
+        exclude_substring = True
 
-    ranked = _rank_candidates(entries, in_category, technology, criteria, anns, limit)
+    ranked = _rank_candidates(entries, in_category, technology, criteria, anns, limit,
+                              exclude_substring=exclude_substring)
     rows = [{**_row(e, anns), "score": round(s, 2)} for s, e in ranked]
     return CommandResult.ok_(
         data=rows,
@@ -206,9 +239,11 @@ def _detect_mentions(text: str, entries: list[dict]) -> list[dict]:
         if re.search(rf"\b{re.escape(key)}\b", low):
             found.setdefault(e["name"], e)
 
-    # Synonym keys (k8s, postgres, …): if one appears, surface its best entry so
-    # abbreviations in a doc still resolve to a real catalog technology.
-    for syn in search.SYNONYMS:
+    # Curated abbreviations (k8s, postgres, …): if one appears, surface its best
+    # entry so abbreviations in a doc still resolve to a real catalog technology.
+    # Restricted to _ABBREV_SYNONYMS so generic prose ("email", "metrics") never
+    # fabricates a detected technology.
+    for syn in _ABBREV_SYNONYMS:
         if len(syn) < 3 or syn in _IGNORE_NAMES:
             continue
         if re.search(rf"\b{re.escape(syn)}\b", low):
@@ -257,12 +292,40 @@ def cmd_analyze_architecture(path: str, limit: int = 5) -> CommandResult:
     )
 
 
+def _resolve_name(entries: list[dict], name: str) -> tuple[str | None, list[str]]:
+    """Map a user-typed name to the canonical index name.
+
+    Returns ``(canonical, [])`` on a unique case-insensitive match, else
+    ``(None, close_matches)`` where close matches are substring suggestions.
+    Guards against typo/case mismatches that would otherwise create dead
+    annotations the search side never looks up.
+    """
+    nl = name.strip().lower()
+    exact = [e["name"] for e in entries if e["name"].lower() == nl]
+    if exact:
+        return exact[0], []
+    close = [e["name"] for e in entries if nl and nl in e["name"].lower()][:5]
+    return None, close
+
+
 def cmd_annotate(name: str, tag: str | None = None,
                  note: str | None = None) -> CommandResult:
     if tag and tag not in annotations.TAGS:
         return CommandResult.err(
             f"unknown tag '{tag}' — choose one of {', '.join(annotations.TAGS)}"
         )
+    clearing = not (tag or "").strip() and not (note or "").strip()
+
+    # Setting an annotation must land on a real entry name, or the tag/nudge is
+    # invisible to search. Clearing bypasses resolution so stale annotations on
+    # renamed/orphaned entries stay deletable.
+    if not clearing:
+        canonical, close = _resolve_name(_entries(), name)
+        if canonical is None:
+            hint = f" — did you mean: {', '.join(close)}?" if close else ""
+            return CommandResult.err(f"no entry named '{name}'{hint}")
+        name = canonical
+
     result = annotations.upsert(name, tag, note)
     action = result["action"]
     if action == "deleted":

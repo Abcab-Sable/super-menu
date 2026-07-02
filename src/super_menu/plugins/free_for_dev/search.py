@@ -131,9 +131,29 @@ def search(entries: list[dict], query: str, category: str | None = None,
     dropped so recall equals the old substring search, not the whole index.
     """
     tokens = tokenize(query)
-    expanded = expand(tokens)
     cl = category.lower() if category else None
 
+    # A query that tokenizes to nothing (all stopwords, e.g. "free" for a tool
+    # literally named *free-for-dev*) would score 0 everywhere and drop every
+    # row — silently breaking the substring-compat contract. Fall back to raw,
+    # unranked substring matching over name/description/category in that case.
+    if not tokens:
+        raw = query.strip().lower()
+        if not raw:
+            return []
+        fallback: list[tuple[float, dict]] = []
+        for e in entries:
+            if cl is not None and cl not in e.get("category", "").lower():
+                continue
+            hay = f"{e.get('name', '')} {e.get('category', '')} {e.get('description', '')}".lower()
+            if raw in hay:
+                fallback.append((1.0, e))
+        fallback.sort(key=lambda pair: pair[1].get("name", "").lower())
+        if limit and limit > 0:
+            return fallback[:limit]
+        return fallback
+
+    expanded = expand(tokens)
     scored: list[tuple[float, dict]] = []
     for e in entries:
         if cl is not None and cl not in e.get("category", "").lower():
