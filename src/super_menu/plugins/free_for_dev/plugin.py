@@ -8,6 +8,10 @@ Search is ranked and synonym-aware (see ``search.py``); a per-user annotation
 overlay (see ``annotations.py``) lets tags reshape ranking. ``suggest-alternatives``
 and ``analyze-architecture`` are deliberately-dumb lexical helpers — Claude does
 the reasoning on top of their output.
+
+Freshness signals (see ``linkcheck.py`` / ``flags.py``) detect stale data:
+``check-links`` probes entry URLs, and ``flag-entry`` records objective staleness
+against a closed reason-type vocabulary with confidence derived from that table.
 """
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 from super_menu.core.plugin import Plugin, Command, Param, CommandResult
-from . import fetch, search, annotations
+from . import fetch, search, annotations, linkcheck, flags
 
 # Entry names that are also common English words or too generic to be a reliable
 # technology mention in a free-text document. Whole-word matches against these
@@ -45,14 +49,22 @@ def _entries() -> list[dict]:
     return idx["entries"] if idx else []
 
 
-def _row(entry: dict, anns: dict[str, dict]) -> dict:
-    """Search/suggest row: the entry fields plus its annotation label."""
+def _row(entry: dict, anns: dict[str, dict], flagged: set[str] = frozenset()) -> dict:
+    """Search/suggest row: the entry fields plus its annotation label.
+
+    ``flagged`` is the set of entry names carrying a pending freshness flag; a
+    matching entry gets a ``⚑`` prefixed onto its annotation cell so a stale
+    entry is visible at a glance in the same column.
+    """
+    label = annotations.label(entry["name"], anns)
+    if entry["name"] in flagged:
+        label = f"⚑ {label}".rstrip()
     return {
         "name": entry["name"],
         "category": entry["category"],
         "url": entry["url"],
         "description": entry["description"],
-        "annotation": annotations.label(entry["name"], anns),
+        "annotation": label,
     }
 
 
@@ -72,10 +84,11 @@ def cmd_search(query: str, category: str | None = None, limit: int = 20) -> Comm
     if not entries:
         return CommandResult.err("index is empty — run the 'update' command first")
     anns = annotations.load()
+    flagged = flags.pending_entries()
     ranked = _rank(entries, query, category, anns)
     total = len(ranked)
     shown = ranked[: max(1, limit)]
-    rows = [_row(e, anns) for _, e in shown]
+    rows = [_row(e, anns, flagged) for _, e in shown]
     return CommandResult.ok_(
         data=rows,
         summary=f"{total} match(es) for '{query}'"
@@ -211,9 +224,10 @@ def cmd_suggest_alternatives(technology: str, criteria: str | None = None,
         in_category = lambda e: e["category"] == anchor  # noqa: E731
         exclude_substring = True
 
+    flagged = flags.pending_entries()
     ranked = _rank_candidates(entries, in_category, technology, criteria, anns, limit,
                               exclude_substring=exclude_substring)
-    rows = [{**_row(e, anns), "score": round(s, 2)} for s, e in ranked]
+    rows = [{**_row(e, anns, flagged), "score": round(s, 2)} for s, e in ranked]
     return CommandResult.ok_(
         data=rows,
         summary=f"{len(rows)} alternative(s) to '{technology}' in category '{anchor}'"
@@ -368,6 +382,235 @@ def cmd_update() -> CommandResult:
     )
 
 
+# --- freshness signals (plan 03): link checking + flags --------------------
+
+
+def _entry_url(entries: list[dict], name: str) -> str | None:
+    return next((e["url"] for e in entries if e["name"] == name), None)
+
+
+def cmd_check_links(category: str | None = None, limit: int = 100,
+                    timeout: float = 10.0, all_results: bool = False,
+                    flag_broken: bool = False) -> CommandResult:
+    entries = _entries()
+    if not entries:
+        return CommandResult.err("index is empty — run the 'update' command first")
+
+    pool = entries
+    if category:
+        cl = category.lower()
+        pool = [e for e in entries if cl in e["category"].lower()]
+        if not pool:
+            return CommandResult.err(f"no category matching '{category}'")
+
+    # Only probe real external links. The index also carries table-of-contents
+    # pseudo-entries whose "url" is a '#anchor'; those are not links to check and
+    # must never be reported broken or auto-flagged.
+    pool = [e for e in pool
+            if e.get("url", "").lower().startswith(("http://", "https://"))]
+    if not pool:
+        return CommandResult.err("no checkable http(s) URLs in scope")
+
+    # Never-checked URLs first (accumulate coverage); then, once everything has
+    # been probed at least once, re-check oldest-first so successive runs cycle
+    # through the whole catalog by staleness rather than re-probing the same head
+    # in index order forever. checked_at is ISO-8601 UTC, so lexical == oldest.
+    store = linkcheck.load_checks()
+    unchecked = [e for e in pool if e["url"] not in store]
+    checked = sorted((e for e in pool if e["url"] in store),
+                     key=lambda e: store[e["url"]].get("checked_at", ""))
+    batch = (unchecked + checked)[: max(1, limit)]
+
+    results = linkcheck.check_many(
+        [(e["name"], e["url"]) for e in batch], timeout=timeout
+    )
+    linkcheck.merge_checks(results)
+
+    broken = sum(1 for r in results if r["status"] in linkcheck.PROBLEM_STATUSES)
+    redirected = sum(1 for r in results if r["status"] == "redirect")
+    # A 429 is "throttled/unknown", not confirmed healthy — count it separately
+    # so it is neither hidden from the table nor tallied as ok.
+    throttled = sum(1 for r in results if r["status"] == "ok_throttled")
+    ok = len(results) - broken - redirected - throttled
+
+    flagged_count = 0
+    if flag_broken:
+        flagged_count = _autoflag_broken(results)
+
+    if all_results:
+        shown = results
+    else:
+        shown = [r for r in results if r["status"] != "ok"]  # everything unhealthy/unknown
+    shown.sort(key=lambda r: (linkcheck.status_rank(r["status"]), r["name"].lower()))
+
+    rows = [{"name": r["name"], "url": r["url"], "status": r["status"],
+             "code": r["code"] if r["code"] is not None else "",
+             "note": r["final_url"] or r["note"]}
+            for r in shown]
+
+    summary = (f"checked {len(results)} URL(s): {broken} broken, "
+               f"{redirected} redirected, {throttled} throttled, {ok} ok")
+    if flag_broken:
+        summary += f"; filed {flagged_count} url_404 flag(s)"
+    return CommandResult.ok_(
+        data=rows, summary=summary, kind="table",
+        columns=["name", "url", "status", "code", "note"],
+    )
+
+
+def _autoflag_broken(results: list[dict]) -> int:
+    """Auto-file url_404 flags for confirmed-dead links, skipping dupes.
+
+    Only ``not_found`` (HTTP 404/410) qualifies — see
+    :data:`linkcheck.DEAD_LINK_STATUSES`. Transient ``unreachable`` and
+    live-but-blocked ``access_denied`` (401/403) are excluded, so
+    "machine-verified by construction" holds: every url_404 flag is backed by a
+    server explicitly reporting the resource gone, not a single flaky or gated
+    probe.
+    """
+    # Load/dedup/save once for the whole batch rather than per broken URL.
+    existing = flags.load()
+    pending = {(f.get("entry"), f.get("reason_type")) for f in existing
+               if f.get("status") == "pending_review"}
+    new: list[dict] = []
+    for r in results:
+        if r["status"] not in linkcheck.DEAD_LINK_STATUSES:
+            continue
+        key = (r["name"], "url_404")
+        if key in pending:
+            continue
+        reason = f"link check returned HTTP {r['code']}"
+        new.append(flags.build(r["name"], "url_404",
+                               reason[:flags.MAX_REASON_LEN], "critical", None))
+        pending.add(key)  # dedupe within this batch too
+    if new:
+        flags.save(existing + new)
+    return len(new)
+
+
+def cmd_flag_entry(entry: str, reason_type: str, reason: str,
+                   severity: str = "warning",
+                   evidence_url: str | None = None) -> CommandResult:
+    if reason_type not in flags.REASON_TYPES:
+        return CommandResult.err(
+            f"unknown reason_type '{reason_type}' — allowed: "
+            f"{', '.join(flags.reason_types())}"
+        )
+    if severity not in flags.SEVERITIES:
+        return CommandResult.err(
+            f"unknown severity '{severity}' — choose one of {', '.join(flags.SEVERITIES)}"
+        )
+    reason = (reason or "").strip()
+    if not reason:
+        return CommandResult.err("reason is required")
+    if len(reason) > flags.MAX_REASON_LEN:
+        return CommandResult.err(f"reason too long (max {flags.MAX_REASON_LEN} chars)")
+
+    entries = _entries()
+    if not entries:
+        return CommandResult.err("index is empty — run the 'update' command first")
+    canonical, close = _resolve_name(entries, entry)
+    if canonical is None:
+        hint = f" — did you mean: {', '.join(close)}?" if close else ""
+        return CommandResult.err(f"no entry named '{entry}'{hint}")
+    entry = canonical
+
+    if flags.evidence_required(reason_type) and not (evidence_url or "").strip():
+        return CommandResult.err(
+            f"reason_type '{reason_type}' requires an evidence_url"
+        )
+
+    # url_404 is the machine-verified tier: it must be backed by a broken
+    # linkcheck record. Re-check on demand if we have no record yet, so the flag
+    # cannot be filed against a URL that is actually live.
+    if reason_type == "url_404":
+        verified = _verify_url_404(entries, entry)
+        if verified is not None:
+            return verified
+
+    if flags.find_pending(entry, reason_type):
+        return CommandResult.err(
+            f"a pending '{reason_type}' flag already exists for '{entry}' — "
+            "dismiss it first or use a different reason_type"
+        )
+
+    record = flags.add(entry, reason_type, reason, severity, evidence_url)
+    return CommandResult.ok_(
+        data=record,
+        summary=f"flagged '{entry}' as {reason_type} "
+                f"(confidence {record['confidence']}, {record['status']})",
+        kind="json",
+    )
+
+
+def _verify_url_404(entries: list[dict], entry: str) -> CommandResult | None:
+    """Confirm ``entry``'s URL returns an HTTP 4xx. Returns an err result to
+    abort, or ``None`` to let the flag proceed.
+
+    A transient ``unreachable`` does not qualify (see
+    :data:`linkcheck.DEAD_LINK_STATUSES`) — url_404 means the server actually
+    answered with a client error, not that one probe failed to connect."""
+    url = _entry_url(entries, entry)
+    if not url:
+        return CommandResult.err(f"cannot resolve a URL for '{entry}'")
+    store = linkcheck.load_checks()
+    record = store.get(url)
+    if not record or record.get("status") not in linkcheck.DEAD_LINK_STATUSES:
+        # No confirmed-dead record on file — re-check this one URL right now.
+        result = linkcheck.check_one(url)
+        linkcheck.merge_checks([{"url": url, **result}])
+        if result["status"] not in linkcheck.DEAD_LINK_STATUSES:
+            return CommandResult.err(
+                f"url_404 rejected: '{entry}' is not a confirmed dead link "
+                f"(status={result['status']}, code={result['code']}; needs an "
+                "HTTP 404/410) — a transient, throttled, or access-denied probe "
+                "does not prove the link is gone. Use service_discontinued with "
+                "evidence if you know the service is gone"
+            )
+    return None
+
+
+def cmd_flags(status: str | None = None) -> CommandResult:
+    if status and status not in flags.STATUSES:
+        return CommandResult.err(
+            f"unknown status '{status}' — choose one of {', '.join(flags.STATUSES)}"
+        )
+    records = flags.load()
+    if status:
+        records = [f for f in records if f.get("status") == status]
+    records.sort(key=lambda f: f.get("created_at", ""), reverse=True)
+    rows = [
+        {
+            "entry": f.get("entry", ""),
+            "reason_type": f.get("reason_type", ""),
+            "severity": f.get("severity", ""),
+            "confidence": f.get("confidence", ""),
+            "status": f.get("status", ""),
+            "created_at": f.get("created_at", ""),
+        }
+        for f in records
+    ]
+    summary = (f"{len(rows)} flag(s)" + (f" with status '{status}'" if status else "")
+               if rows else "no flags" + (f" with status '{status}'" if status else ""))
+    return CommandResult.ok_(
+        data=rows, summary=summary, kind="table",
+        columns=["entry", "reason_type", "severity", "confidence", "status", "created_at"],
+    )
+
+
+def cmd_dismiss_flag(entry: str, reason_type: str) -> CommandResult:
+    updated = flags.dismiss(entry, reason_type)
+    if updated is None:
+        return CommandResult.err(
+            f"no pending '{reason_type}' flag for '{entry}' to dismiss"
+        )
+    return CommandResult.ok_(
+        data=updated,
+        summary=f"dismissed '{reason_type}' flag for '{entry}'",
+        kind="json",
+    )
+
+
 class FreeForDevPlugin(Plugin):
     id = "free-for-dev"
     name = "Free for Dev"
@@ -445,6 +688,57 @@ class FreeForDevPlugin(Plugin):
                 name="update",
                 help="Re-fetch the free-for-dev README and rebuild the local index.",
                 handler=cmd_update,
+            ),
+            Command(
+                name="check-links",
+                help="Probe entry URLs and report broken/redirected links.",
+                handler=cmd_check_links,
+                params=[
+                    Param("category", help="Limit to a category (substring match)."),
+                    Param("limit", type="int", default=100,
+                          help="Max URLs to check this run (unchecked first)."),
+                    Param("timeout", type="float", default=10.0,
+                          help="Per-request timeout in seconds."),
+                    Param("all_results", type="bool", default=False,
+                          help="Include OK rows, not just problems."),
+                    Param("flag_broken", type="bool", default=False,
+                          help="Auto-file url_404 flags for broken/unreachable links."),
+                ],
+            ),
+            Command(
+                name="flag-entry",
+                help="File an objective freshness flag against an entry.",
+                handler=cmd_flag_entry,
+                params=[
+                    Param("entry", required=True, help="Exact entry name to flag."),
+                    Param("reason_type", required=True, choices=flags.reason_types(),
+                          help="Closed vocabulary: " + ", ".join(flags.reason_types()) + "."),
+                    Param("reason", required=True,
+                          help="Short factual reason (≤ 200 chars)."),
+                    Param("severity", choices=flags.SEVERITIES, default="warning",
+                          help="critical | warning | info."),
+                    Param("evidence_url",
+                          help="Required for all reason_types except url_404 / category_mismatch."),
+                ],
+            ),
+            Command(
+                name="flags",
+                help="List freshness flags (optionally filter by status).",
+                handler=cmd_flags,
+                params=[
+                    Param("status", choices=flags.STATUSES,
+                          help="pending_review | dismissed | actioned."),
+                ],
+            ),
+            Command(
+                name="dismiss-flag",
+                help="Dismiss a pending flag (kept as an audit record, never deleted).",
+                handler=cmd_dismiss_flag,
+                params=[
+                    Param("entry", required=True, help="Flagged entry name."),
+                    Param("reason_type", required=True, choices=flags.reason_types(),
+                          help="Which reason_type flag to dismiss."),
+                ],
             ),
         ]
 
