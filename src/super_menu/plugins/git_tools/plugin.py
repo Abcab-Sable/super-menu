@@ -14,16 +14,27 @@ from super_menu.core.plugin import Plugin, Command, Param, CommandResult
 from . import gitio
 
 
-def _not_a_repo() -> CommandResult:
-    return CommandResult.err("not a git repository (or no git on PATH)")
+def _repo_guard() -> CommandResult | None:
+    """Shared precondition: err result if cwd is not a repo, else None.
+
+    Only the ``ensure_repo`` probe maps to the generic message; failures from
+    the actual command afterwards keep git's own stderr, which carries the
+    actionable detail (e.g. "detected dubious ownership").
+    """
+    try:
+        gitio.ensure_repo()
+    except gitio.GitError:
+        return CommandResult.err("not a git repository (or no git on PATH)")
+    return None
 
 
 def cmd_status() -> CommandResult:
+    if (guard := _repo_guard()) is not None:
+        return guard
     try:
-        gitio.ensure_repo()
         out = gitio.run_git("status", "--porcelain=v2", "--branch")
-    except gitio.GitError:
-        return _not_a_repo()
+    except gitio.GitError as exc:
+        return CommandResult.err(str(exc))
     row = gitio.parse_status(out)
     return CommandResult.ok_(
         data=[row],  # single-row table so it renders uniformly with the others
@@ -36,10 +47,8 @@ def cmd_status() -> CommandResult:
 
 def cmd_log(author: str | None = None, since: int | None = None,
             limit: int = 20) -> CommandResult:
-    try:
-        gitio.ensure_repo()
-    except gitio.GitError:
-        return _not_a_repo()
+    if (guard := _repo_guard()) is not None:
+        return guard
     args = ["log", f"--pretty=format:{gitio.LOG_FORMAT}", "-n", str(max(1, limit))]
     if author:
         args.append(f"--author={author}")
@@ -68,10 +77,8 @@ def cmd_log(author: str | None = None, since: int | None = None,
 
 def cmd_branch(remote: bool = False, merged: bool = False,
                sort: str = "name") -> CommandResult:
-    try:
-        gitio.ensure_repo()
-    except gitio.GitError:
-        return _not_a_repo()
+    if (guard := _repo_guard()) is not None:
+        return guard
     refs = ["refs/heads"]
     if remote:
         refs.append("refs/remotes")
@@ -96,19 +103,18 @@ def cmd_branch(remote: bool = False, merged: bool = False,
 
 
 def cmd_diff_stats(against: str = "main", limit_files: int = 50) -> CommandResult:
-    try:
-        gitio.ensure_repo()
-    except gitio.GitError:
-        return _not_a_repo()
+    if (guard := _repo_guard()) is not None:
+        return guard
     try:
         out = gitio.run_git("diff", "--numstat", f"{against}...HEAD")
     except gitio.GitError as exc:
         return CommandResult.err(str(exc))
     rows = gitio.parse_numstat(out)
     total = len(rows)
-    rows = rows[: max(1, limit_files)]
+    # Totals cover the whole diff; truncation below only limits displayed rows.
     adds = sum(r["additions"] for r in rows)
     dels = sum(r["deletions"] for r in rows)
+    rows = rows[: max(1, limit_files)]
     return CommandResult.ok_(
         data=rows,
         summary=f"{total} file(s) changed vs '{against}', +{adds}/-{dels}"

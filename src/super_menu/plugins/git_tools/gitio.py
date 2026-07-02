@@ -7,7 +7,7 @@ a subprocess. All git calls go through :func:`run_git`; all parsing lives in the
 ``parse_*`` functions.
 
 Machine formats only (``--porcelain=v2``, ``for-each-ref --format=``,
-``--pretty=format:``) with ``\x1f`` (ASCII unit separator) as the field delimiter,
+``--pretty=format:``) with ``\\x1f`` (ASCII unit separator) as the field delimiter,
 because commit subjects and branch names can contain ``|``, tabs, or anything else.
 No caching: local git is milliseconds.
 """
@@ -27,14 +27,17 @@ class GitError(Exception):
 
 def run_git(*args: str, cwd: Optional[Path] = None) -> str:
     """Run git and return stdout. Raises :class:`GitError` (never
-    ``CalledProcessError``) carrying stderr on a non-zero exit."""
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    ``CalledProcessError`` or ``OSError``) carrying stderr on a non-zero exit."""
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError as exc:  # git binary missing/unlaunchable
+        raise GitError(f"git not found on PATH ({exc})") from exc
     if proc.returncode != 0:
         raise GitError(proc.stderr.strip() or f"git {args[0] if args else ''} failed")
     return proc.stdout
