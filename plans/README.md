@@ -4,13 +4,16 @@ One plan per phase of the [FEATURE_IDEAS.md](../FEATURE_IDEAS.md) roadmap. Each 
 self-contained: goal, file layout, command specs against the real plugin contract
 (`src/super_menu/core/plugin.py`), data shapes, edge cases, and exit criteria.
 
-| Plan | Feature | Depends on | Risk |
-|------|---------|------------|------|
-| [01-git-tools](01-git-tools.md) | git-tools plugin | — | Low |
-| [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | Low |
-| [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | Medium |
-| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | — (process, not code) |
-| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | High |
+| Plan | Feature | Depends on | Status |
+|------|---------|------------|--------|
+| [01-git-tools](01-git-tools.md) | git-tools plugin | — | **Closed** — tranche 1 shipped ([PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)); tranche 2 cancelled; plugin reframed as the subprocess-backed reference example |
+| [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | **Next up** (low risk) |
+| [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | Planned (medium risk) |
+| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | Planned (process, not code) |
+| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | Gated (high risk) |
+
+Lesson recorded from plan 01: rank plans by *who stops using their current tool for
+this*, not by how cheap they are to build. Low effort × low value is still low value.
 
 Deferred (no plan until evidence demands one): semantic search/embeddings, structured
 extraction. See "Deferred" in FEATURE_IDEAS.md for the bar they must clear.
