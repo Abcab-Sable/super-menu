@@ -28,6 +28,9 @@ uv run super-menu list
 uv run super-menu free-for-dev update                  # build the index
 uv run super-menu free-for-dev categories
 uv run super-menu free-for-dev search --query postgres --json
+
+uv run super-menu git status                           # read-only git state
+uv run super-menu git log --limit 5 --json
 ```
 
 ## Architecture
@@ -43,6 +46,7 @@ src/super_menu/
   mcp_server.py   # exposes every command as an MCP tool (low-level mcp.server API)
   plugins/
     free_for_dev/ # reference plugin: fetch + parse + search the free-for-dev catalog
+    git_tools/    # read-only git state (status, log, branches, diffs) via subprocess
 ```
 
 A plugin never writes UI code. It declares `Command`s with typed `Param`s and a handler

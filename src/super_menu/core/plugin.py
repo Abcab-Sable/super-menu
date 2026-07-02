@@ -106,9 +106,9 @@ class Plugin:
     """Base class for every integration. Subclass it, set the identity fields,
     and return a list of ``Command`` from :meth:`commands`.
 
-    ``id`` must be a stable, lowercase, hyphen/underscore-free token — it is used
-    in CLI invocation (``super-menu <id> <command>``) and MCP tool names
-    (``<id>__<command>``).
+    ``id`` must be a stable, lowercase ``[a-z0-9-]`` token — it is used in CLI
+    invocation (``super-menu <id> <command>``) and MCP tool names
+    (``<id>__<command>``). Hyphens are allowed (``free-for-dev``).
     """
 
     id: str = ""

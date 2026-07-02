@@ -8,6 +8,7 @@ from super_menu.plugins.free_for_dev import fetch
 def test_plugin_discovered():
     reg = default_registry()
     assert reg.get("free-for-dev") is not None
+    assert reg.get("git") is not None
 
 
 def test_parse_markdown():
