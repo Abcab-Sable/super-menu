@@ -3,13 +3,31 @@
 Doubles as a knowledge source for Claude Code when designing app architectures —
 query it via ``super-menu free-for-dev search "postgres"`` (add ``--json``) or the
 matching MCP tool.
+
+Search is ranked and synonym-aware (see ``search.py``); a per-user annotation
+overlay (see ``annotations.py``) lets tags reshape ranking. ``suggest-alternatives``
+and ``analyze-architecture`` are deliberately-dumb lexical helpers — Claude does
+the reasoning on top of their output.
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
+from pathlib import Path
 
 from super_menu.core.plugin import Plugin, Command, Param, CommandResult
-from . import fetch
+from . import fetch, search, annotations
+
+# Entry names that are also common English words or too generic to be a reliable
+# technology mention in a free-text document. Whole-word matches against these
+# are ignored by ``analyze-architecture``. Expect to grow this from real docs.
+_IGNORE_NAMES = {
+    "files", "notes", "free", "tools", "docs", "apps", "api", "apis", "cloud",
+    "data", "email", "mail", "host", "hosting", "text", "images", "web", "site",
+    "app", "code", "test", "tests", "build", "deploy", "static", "search",
+}
+
+_SEARCH_COLUMNS = ["name", "category", "url", "description", "annotation"]
 
 
 def _entries() -> list[dict]:
@@ -17,32 +35,44 @@ def _entries() -> list[dict]:
     return idx["entries"] if idx else []
 
 
-def _matches(entry: dict, query: str) -> bool:
-    q = query.lower()
-    return (
-        q in entry["name"].lower()
-        or q in entry["description"].lower()
-        or q in entry["category"].lower()
-    )
+def _row(entry: dict, anns: dict[str, dict]) -> dict:
+    """Search/suggest row: the entry fields plus its annotation label."""
+    return {
+        "name": entry["name"],
+        "category": entry["category"],
+        "url": entry["url"],
+        "description": entry["description"],
+        "annotation": annotations.label(entry["name"], anns),
+    }
+
+
+def _rank(entries: list[dict], query: str, category: str | None,
+          anns: dict[str, dict]) -> list[tuple[float, dict]]:
+    """Search then apply annotation score nudges and re-sort."""
+    scored = search.search(entries, query, category, limit=0)
+    adjusted = [
+        (s + annotations.score_adjust(e["name"], anns), e) for s, e in scored
+    ]
+    adjusted.sort(key=lambda pair: (-pair[0], pair[1]["name"].lower()))
+    return adjusted
 
 
 def cmd_search(query: str, category: str | None = None, limit: int = 20) -> CommandResult:
     entries = _entries()
     if not entries:
         return CommandResult.err("index is empty — run the 'update' command first")
-    results = [e for e in entries if _matches(e, query)]
-    if category:
-        cl = category.lower()
-        results = [e for e in results if cl in e["category"].lower()]
-    total = len(results)
-    results = results[: max(1, limit)]
+    anns = annotations.load()
+    ranked = _rank(entries, query, category, anns)
+    total = len(ranked)
+    shown = ranked[: max(1, limit)]
+    rows = [_row(e, anns) for _, e in shown]
     return CommandResult.ok_(
-        data=results,
+        data=rows,
         summary=f"{total} match(es) for '{query}'"
         + (f" in '{category}'" if category else "")
-        + (f" (showing {len(results)})" if total > len(results) else ""),
+        + (f" (showing {len(rows)})" if total > len(rows) else ""),
         kind="table",
-        columns=["name", "category", "url", "description"],
+        columns=_SEARCH_COLUMNS,
     )
 
 
@@ -76,6 +106,193 @@ def cmd_category(name: str, limit: int = 50) -> CommandResult:
     )
 
 
+def _rank_candidates(entries: list[dict], in_category, exclude: str,
+                     criteria: str | None, anns: dict[str, dict],
+                     limit: int) -> list[tuple[float, dict]]:
+    """Rank entries within an anchor category by optional ``criteria``.
+
+    ``in_category`` is a predicate selecting the candidate pool; ``exclude`` is
+    the named technology itself (dropped by name match). Criteria tokens are
+    scored against each candidate (name/category/description); annotation tags
+    nudge the result. With no criteria, ordering is annotation-then-name.
+    """
+    crit_tokens = search.tokenize(criteria) if criteria else []
+    crit_expanded = search.expand(crit_tokens) if crit_tokens else set()
+    ex = exclude.lower().strip()
+
+    cands: list[tuple[float, dict]] = []
+    for e in entries:
+        if not in_category(e):
+            continue
+        nm = e["name"].lower()
+        if ex and (nm == ex or ex in nm):
+            continue
+        base = search.score(e, crit_tokens, crit_expanded) if crit_tokens else 0.0
+        base += annotations.score_adjust(e["name"], anns)
+        cands.append((base, e))
+
+    cands.sort(key=lambda pair: (-pair[0], pair[1]["name"].lower()))
+    return cands[:limit] if limit and limit > 0 else cands
+
+
+def _anchor_by_name(entries: list[dict], technology: str) -> dict | None:
+    """Best entry whose *name* actually matches ``technology`` (else None).
+
+    Ranks name matches with the search scorer but keeps only candidates that
+    share a token with, or contain, the query in their name — so "Oracle
+    Exadata" (indexed nowhere by name) returns None even though its tokens hit
+    some descriptions.
+    """
+    tokens = search.tokenize(technology)
+    if not tokens:
+        return None
+    for _, e in search.search(entries, technology, limit=10):
+        name = e["name"].lower()
+        name_tokens = set(search.tokenize(name))
+        if any(t in name_tokens or t in name for t in tokens):
+            return e
+    return None
+
+
+def cmd_suggest_alternatives(technology: str, criteria: str | None = None,
+                             category: str | None = None,
+                             limit: int = 10) -> CommandResult:
+    entries = _entries()
+    if not entries:
+        return CommandResult.err("index is empty — run the 'update' command first")
+    anns = annotations.load()
+
+    if category:
+        cl = category.lower()
+        in_category = lambda e: cl in e["category"].lower()  # noqa: E731
+        anchor = category
+    else:
+        # Anchor only on a genuine *name* match — a mere description hit (of
+        # which the 1.5k-entry index always has some) is not enough to trust the
+        # category guess. No name match ⇒ tell the user to pass an override.
+        anchored = _anchor_by_name(entries, technology)
+        if anchored is None:
+            return CommandResult.err(
+                f"'{technology}' not found by name in the index — pass "
+                "category=<name> to anchor the search manually"
+            )
+        anchor = anchored["category"]
+        in_category = lambda e: e["category"] == anchor  # noqa: E731
+
+    ranked = _rank_candidates(entries, in_category, technology, criteria, anns, limit)
+    rows = [{**_row(e, anns), "score": round(s, 2)} for s, e in ranked]
+    return CommandResult.ok_(
+        data=rows,
+        summary=f"{len(rows)} alternative(s) to '{technology}' in category '{anchor}'"
+        + (f" ranked by '{criteria}'" if criteria else ""),
+        kind="table",
+        columns=["name", "category", "score", "url", "description", "annotation"],
+    )
+
+
+def _detect_mentions(text: str, entries: list[dict]) -> list[dict]:
+    """Entries whose name (or a synonym key) appears as a whole word in ``text``.
+
+    Case-insensitive; names shorter than 3 chars or on ``_IGNORE_NAMES`` are
+    skipped. Deduped by entry name, first occurrence wins.
+    """
+    low = text.lower()
+    found: dict[str, dict] = {}
+
+    for e in entries:
+        key = e["name"].lower()
+        if len(key) < 3 or key in _IGNORE_NAMES:
+            continue
+        if re.search(rf"\b{re.escape(key)}\b", low):
+            found.setdefault(e["name"], e)
+
+    # Synonym keys (k8s, postgres, …): if one appears, surface its best entry so
+    # abbreviations in a doc still resolve to a real catalog technology.
+    for syn in search.SYNONYMS:
+        if len(syn) < 3 or syn in _IGNORE_NAMES:
+            continue
+        if re.search(rf"\b{re.escape(syn)}\b", low):
+            hits = search.search(entries, syn, limit=1)
+            if hits:
+                e = hits[0][1]
+                found.setdefault(e["name"], e)
+
+    return list(found.values())
+
+
+def cmd_analyze_architecture(path: str, limit: int = 5) -> CommandResult:
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        return CommandResult.err(f"cannot read '{path}': {exc}")
+
+    entries = _entries()
+    if not entries:
+        return CommandResult.err("index is empty — run the 'update' command first")
+    anns = annotations.load()
+
+    mentions = _detect_mentions(text, entries)
+    rows: list[dict] = []
+    for entry in mentions:
+        anchor = entry["category"]
+        ranked = _rank_candidates(
+            entries, lambda e, a=anchor: e["category"] == a,
+            entry["name"], None, anns, limit,
+        )
+        alts = [{**_row(e, anns), "score": round(s, 2)} for s, e in ranked]
+        rows.append({
+            "technology": entry["name"],
+            "category": anchor,
+            "alternatives": ", ".join(a["name"] for a in alts) or "(none in category)",
+            # Full structure for --json / MCP consumers; the table shows the join.
+            "alternatives_detail": alts,
+        })
+
+    rows.sort(key=lambda r: r["technology"].lower())
+    return CommandResult.ok_(
+        data=rows,
+        summary=f"{len(rows)} known technolog(y/ies) found in '{path}'",
+        kind="table",
+        columns=["technology", "category", "alternatives"],
+    )
+
+
+def cmd_annotate(name: str, tag: str | None = None,
+                 note: str | None = None) -> CommandResult:
+    if tag and tag not in annotations.TAGS:
+        return CommandResult.err(
+            f"unknown tag '{tag}' — choose one of {', '.join(annotations.TAGS)}"
+        )
+    result = annotations.upsert(name, tag, note)
+    action = result["action"]
+    if action == "deleted":
+        summary = f"cleared annotation for '{name}'"
+    elif action == "noop":
+        summary = f"no annotation to clear for '{name}'"
+    else:
+        summary = f"annotated '{name}'" + (f" as {result['tag']}" if result.get("tag") else "")
+    return CommandResult.ok_(data=result, summary=summary, kind="json")
+
+
+def cmd_annotations() -> CommandResult:
+    anns = annotations.load()
+    rows = [
+        {
+            "name": n,
+            "tag": a.get("tag", ""),
+            "note": a.get("note", ""),
+            "updated_at": a.get("updated_at", ""),
+        }
+        for n, a in sorted(anns.items())
+    ]
+    return CommandResult.ok_(
+        data=rows,
+        summary=f"{len(rows)} annotation(s)" if rows else "no annotations yet",
+        kind="table",
+        columns=["name", "tag", "note", "updated_at"],
+    )
+
+
 def cmd_update() -> CommandResult:
     try:
         meta = fetch.update_index()
@@ -98,13 +315,54 @@ class FreeForDevPlugin(Plugin):
         return [
             Command(
                 name="search",
-                help="Search entries by name, description, or category.",
+                help="Ranked search by name, description, or category (synonym-aware).",
                 handler=cmd_search,
                 params=[
                     Param("query", required=True, help="Text to search for."),
                     Param("category", help="Restrict to a category (substring match)."),
                     Param("limit", type="int", default=20, help="Max results."),
                 ],
+            ),
+            Command(
+                name="suggest-alternatives",
+                help="Alternatives to a named service, from its catalog category.",
+                handler=cmd_suggest_alternatives,
+                params=[
+                    Param("technology", required=True,
+                          help="Named service, e.g. 'Auth0'."),
+                    Param("criteria",
+                          help="Optional constraints, e.g. 'open-source, EU data'."),
+                    Param("category",
+                          help="Anchor category override if the service isn't indexed."),
+                    Param("limit", type="int", default=10, help="Max alternatives."),
+                ],
+            ),
+            Command(
+                name="analyze-architecture",
+                help="Scan a doc for known technologies and suggest alternatives.",
+                handler=cmd_analyze_architecture,
+                params=[
+                    Param("path", required=True,
+                          help="Markdown/YAML/text doc to scan."),
+                    Param("limit", type="int", default=5,
+                          help="Max alternatives per technology."),
+                ],
+            ),
+            Command(
+                name="annotate",
+                help="Tag an entry (star/avoid/using/note); empty tag+note clears it.",
+                handler=cmd_annotate,
+                params=[
+                    Param("name", required=True, help="Exact entry name to annotate."),
+                    Param("tag", choices=annotations.TAGS,
+                          help="star | avoid | using | note."),
+                    Param("note", help="Free-text note."),
+                ],
+            ),
+            Command(
+                name="annotations",
+                help="List all your entry annotations.",
+                handler=cmd_annotations,
             ),
             Command(
                 name="categories",
