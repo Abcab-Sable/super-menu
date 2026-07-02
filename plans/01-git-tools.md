@@ -1,5 +1,19 @@
 # Plan 01 — git-tools plugin
 
+> **Status (2026-07-02): tranche 1 shipped, tranche 2 cancelled, plan closed.**
+> Tranche 1 merged in [PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)
+> (review fixes included). The plugin is hereby reframed as the **reference
+> plugin for subprocess-backed sources** — an example for plugin authors, not a
+> product feature — because every further command duplicates strictly better
+> tools: Claude Code runs `git` directly, other MCP clients have the official
+> [`mcp-server-git`](https://github.com/modelcontextprotocol/servers/tree/main/src/git),
+> and humans have the git CLI, lazygit, and IDE integrations. Each extra command
+> would also bloat the MCP tool list of every connected session. The plan's
+> one-time value — proving the contract generalizes and hardening error-handling
+> conventions (`_repo_guard`, `GitError` wrapping) — has been delivered.
+> Effort redirects to [plan 02](02-smart-discovery.md), where super-menu is
+> actually differentiated.
+
 ## Goal
 
 A second plugin that surfaces git state as queryable tables on all three surfaces.
@@ -68,13 +82,12 @@ Notes:
 - `diff-stats`: `--numstat` prints `-` for binary files; parse to 0 with a
   `binary=true` marker in the row.
 
-### Tranche 2 — after tranche 1 works on all three surfaces
+### Tranche 2 — CANCELLED
 
-| Command | Params | Notes |
-|---|---|---|
-| `tag` | `pattern` str, `limit` int=30 | `for-each-ref refs/tags --format=` (annotated vs lightweight both covered) |
-| `stash` | `pattern` str (optional) | `stash list --pretty=format:`; when `pattern` given, filter with `stash list -G<pattern>` — flat command, no subcommands (the contract has no nesting) |
-| `blame` | `file` str required, `since` int (days) | `blame --line-porcelain -- <file>`; condense runs of the same author into one row: line_start, line_end, author, date |
+`tag`, `stash`, and `blame` will not be built. Rationale in the status note at the
+top: no user segment prefers them over existing tools, and each command adds MCP
+tool-list overhead for zero differentiated value. Do not resurrect without naming
+a concrete user who would drop their current tool for it.
 
 ## Testing (`tests/test_git_tools.py`)
 

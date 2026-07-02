@@ -13,13 +13,13 @@ Guiding principle throughout: **build the cheapest version that proves the value
 
 ---
 
-## 1. git-tools Plugin
+## 1. git-tools Plugin — SHIPPED (tranche 1) & CLOSED
+
+> **Status (2026-07-02):** tranche 1 merged ([PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)); tranche 2 cancelled. Post-ship review concluded the honest scoping note below was understated: Claude Code runs `git` directly, other MCP clients have the official `mcp-server-git`, and humans have the git CLI/lazygit/IDE integrations — no user segment prefers this plugin over their current tool. Its delivered value is as the **reference plugin for subprocess-backed sources** (contract proof, error-handling conventions), and it stays in the tree in that role only. No further git commands. Details in [plans/01-git-tools.md](plans/01-git-tools.md).
 
 An extensible git plugin that surfaces repository state and history as queryable tables. Enables Claude Code to understand repo context during architecture reviews and coding sessions.
 
-This is the **best first build**: pure metadata commands returning tables, zero UI code, useful on all three surfaces, and a second reference plugin that proves the plugin contract generalizes beyond free-for-dev.
-
-**Honest scoping note:** Claude Code can already run `git` directly via its shell. The MCP value here is mostly for *other* MCP clients and for the TUI/CLI surfaces (a git dashboard, structured JSON for scripting). That's still plenty — just don't oversell the Claude angle.
+**Honest scoping note (pre-ship):** Claude Code can already run `git` directly via its shell. The MCP value here is mostly for *other* MCP clients and for the TUI/CLI surfaces (a git dashboard, structured JSON for scripting). That's still plenty — just don't oversell the Claude angle.
 
 ### Commands
 
@@ -354,10 +354,10 @@ class Evidence:
 
 Reordered by effort-vs-payoff: quick, low-risk wins first; speculative tech and upstream-dependent work gated behind validation.
 
-### Phase 1: git-tools Plugin
-- [ ] Implement git-tools plugin with core commands (status, log, branch, diff-stats first)
-- [ ] Verify it works cleanly on all three surfaces (proves the contract generalizes)
-- [ ] Add remaining commands (tag, stash, blame)
+### Phase 1: git-tools Plugin — DONE / CLOSED
+- [x] Implement git-tools plugin with core commands (status, log, branch, diff-stats first)
+- [x] Verify it works cleanly on all three surfaces (proves the contract generalizes)
+- [~] ~~Add remaining commands (tag, stash, blame)~~ — cancelled; duplicates better tools (see §1 status note)
 
 ### Phase 2: Smart Discovery (keyword-first)
 - [ ] Upgrade free-for-dev search: tokenized matching, category ranking, synonym map
