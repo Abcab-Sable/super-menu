@@ -28,6 +28,12 @@ _SKIP_HEADINGS = {"table of contents", "free for dev"}
 # Matches a top-level bullet that is a link entry. Captures name, url, rest.
 _ENTRY_RE = re.compile(r"^\s*[-*]\s+\[(?P<name>[^\]]+)\]\((?P<url>[^)]+)\)(?P<rest>.*)$")
 _HEADING_RE = re.compile(r"^(#{2,4})\s+(?P<title>.+?)\s*#*$")
+# A real catalog entry links to an *absolute* URL (has a scheme). The README's
+# table-of-contents bullets link to in-page ``#anchor`` headings and the odd
+# relative path — those have no scheme. Matching on "has a scheme" rather than
+# "is http(s)" keeps legitimate non-http entries such as the WebRTC section's
+# ``stun:``/``turn:`` servers.
+_URL_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.\-]*:", re.IGNORECASE)
 
 
 @dataclass
@@ -61,11 +67,12 @@ def parse_markdown(md: str) -> list[Entry]:
         if not m:
             continue
         url = m.group("url").strip()
-        # Skip the README's table-of-contents bullets — ``- [Section](#anchor)``
-        # links to in-page headings, not real services. Only genuine external
-        # http(s) links are catalog entries; anything else (``#anchor``, relative
-        # paths, ``mailto:``) would just pollute search and analyze-architecture.
-        if not url.lower().startswith(("http://", "https://")):
+        # Skip the README's table-of-contents bullets (``- [Section](#anchor)``)
+        # and any other relative/in-page link: those have no URL scheme and are
+        # not real services, so they would just pollute search and
+        # analyze-architecture. Absolute URLs of any scheme are kept — including
+        # non-http ones like the WebRTC section's ``stun:``/``turn:`` servers.
+        if not _URL_SCHEME_RE.match(url):
             continue
         rest = m.group("rest")
         # Strip a leading separator (—, -, :, etc.) from the description.
