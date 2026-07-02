@@ -28,6 +28,31 @@ def test_parse_markdown():
     assert entries[1].description == "does things"
 
 
+def test_parse_markdown_skips_toc_and_relative_links():
+    # The real README opens with a table of contents whose bullets link to
+    # in-page ``#anchor`` headings, plus the occasional relative path. Those have
+    # no URL scheme and are not real catalog entries. Absolute URLs are kept —
+    # including non-http schemes like the WebRTC section's ``stun:`` servers, so
+    # the filter must not be "http(s) only".
+    md = (
+        "# Free for dev\n"
+        "## Table of Contents\n"
+        "- [Major Cloud Providers](#major-cloud-providers)\n"
+        "- [Analytics, Events and Statistics](#analytics-events-and-statistics)\n"
+        "## Major Cloud Providers\n"
+        "- [Acme](https://acme.example) - Real service.\n"
+        "- [Local](/relative/path) - not a service\n"
+        "## Tunneling, WebRTC and Other Routers\n"
+        "- [Example STUN](stun:stun.example.com:3478) - WebRTC STUN server.\n"
+    )
+    entries = fetch.parse_markdown(md)
+    assert [e.name for e in entries] == ["Acme", "Example STUN"], entries
+    # In-page anchors and relative links are excluded...
+    assert all(not e.url.startswith(("#", "/")) for e in entries)
+    # ...but a legitimate non-http scheme (stun:) is preserved.
+    assert any(e.url.startswith("stun:") for e in entries)
+
+
 def test_command_run_and_result_shape():
     plugin = default_registry().get("free-for-dev")
     cmd = plugin.command("categories")
@@ -62,6 +87,7 @@ def test_tui_boots():
 if __name__ == "__main__":
     test_plugin_discovered()
     test_parse_markdown()
+    test_parse_markdown_skips_toc_and_relative_links()
     test_command_run_and_result_shape()
     test_search_missing_required_param()
     test_tui_boots()
