@@ -213,7 +213,31 @@ def test_url_404_rejected_when_url_is_live():
     _reset()
     with _fake_net(lambda url, m: _FakeResp(200, url)):
         res = plugin.cmd_flag_entry("Auth0", "url_404", "link dead")
-    assert not res.ok and "resolves fine" in res.summary
+    assert not res.ok and "did not return an HTTP 4xx" in res.summary
+
+
+def _unreachable(url, method):
+    raise urllib.error.URLError("timed out")
+
+
+def test_url_404_rejected_on_transient_unreachable():
+    # A one-off connection failure is not a confirmed dead link — url_404 needs
+    # an actual 4xx, so a transient unreachable must be rejected, not filed.
+    _reset()
+    with _fake_net(_unreachable):
+        res = plugin.cmd_flag_entry("Auth0", "url_404", "link dead")
+    assert not res.ok and "did not return an HTTP 4xx" in res.summary
+    assert flags.load() == []
+
+
+def test_unreachable_not_auto_flagged():
+    # check-links --flag_broken must not permanently flag a flaky/unreachable
+    # probe as a critical url_404; only real 4xx responses qualify.
+    _reset()
+    with _fake_net(_unreachable):
+        res = plugin.cmd_check_links(limit=10, flag_broken=True)
+    assert "filed 0 url_404 flag(s)" in res.summary
+    assert flags.load() == []
 
 
 # --- wire-up: pending flag surfaces in search + flags listing --------------
@@ -245,6 +269,46 @@ def test_check_links_flag_broken_files_once_and_dedupes():
     assert len(flags.load()) == 3
 
 
+def test_throttled_counted_separately_and_surfaced():
+    # A 429 is throttled/unknown, not healthy: it must be counted on its own and
+    # shown in the default (problems) table rather than folded into "ok".
+    _reset()
+    with _fake_net(lambda url, m: _http_error(url, 429)):
+        res = plugin.cmd_check_links(limit=10)
+    assert "3 throttled" in res.summary and "0 ok" in res.summary, res.summary
+    assert {r["status"] for r in res.data} == {"ok_throttled"}, res.data
+
+
+def test_check_links_refreshes_oldest_first():
+    # Once every URL is checked, re-runs must re-probe the *stalest* URL first
+    # (oldest checked_at), not the same head of the index every time.
+    _reset()
+    linkcheck.save_checks({
+        "https://auth0.example":
+            {"status": "ok", "code": 200, "final_url": "",
+             "checked_at": "2026-01-03T00:00:00+00:00"},
+        "https://okta.example":
+            {"status": "ok", "code": 200, "final_url": "",
+             "checked_at": "2026-01-02T00:00:00+00:00"},
+        "https://mailgrid.example":
+            {"status": "ok", "code": 200, "final_url": "",
+             "checked_at": "2026-01-01T00:00:00+00:00"},  # oldest
+    })
+    captured = {}
+    orig = linkcheck.check_many
+
+    def _capture(items, **kw):
+        captured["items"] = items
+        return []
+
+    linkcheck.check_many = _capture
+    try:
+        plugin.cmd_check_links(limit=1)
+    finally:
+        linkcheck.check_many = orig
+    assert [u for _, u in captured["items"]] == ["https://mailgrid.example"], captured
+
+
 def test_dismiss_flag_updates_status():
     _reset()
     plugin.cmd_flag_entry("Auth0", "category_mismatch", "wrong bucket")
@@ -271,7 +335,11 @@ if __name__ == "__main__":
     test_duplicate_pending_flag_rejected()
     test_url_404_without_record_triggers_recheck_and_files()
     test_url_404_rejected_when_url_is_live()
+    test_url_404_rejected_on_transient_unreachable()
+    test_unreachable_not_auto_flagged()
     test_pending_flag_marks_search_row()
     test_check_links_flag_broken_files_once_and_dedupes()
+    test_throttled_counted_separately_and_surfaced()
+    test_check_links_refreshes_oldest_first()
     test_dismiss_flag_updates_status()
     print("all freshness tests passed")

@@ -411,13 +411,15 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
     if not pool:
         return CommandResult.err("no checkable http(s) URLs in scope")
 
-    # Prioritise never-checked URLs so successive limit-capped runs accumulate
-    # coverage instead of re-probing the same head of the list every time.
+    # Never-checked URLs first (accumulate coverage); then, once everything has
+    # been probed at least once, re-check oldest-first so successive runs cycle
+    # through the whole catalog by staleness rather than re-probing the same head
+    # in index order forever. checked_at is ISO-8601 UTC, so lexical == oldest.
     store = linkcheck.load_checks()
     unchecked = [e for e in pool if e["url"] not in store]
-    checked = [e for e in pool if e["url"] in store]
-    ordered = unchecked + checked
-    batch = ordered[: max(1, limit)]
+    checked = sorted((e for e in pool if e["url"] in store),
+                     key=lambda e: store[e["url"]].get("checked_at", ""))
+    batch = (unchecked + checked)[: max(1, limit)]
 
     results = linkcheck.check_many(
         [(e["name"], e["url"]) for e in batch], timeout=timeout
@@ -426,7 +428,10 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
 
     broken = sum(1 for r in results if r["status"] in linkcheck.PROBLEM_STATUSES)
     redirected = sum(1 for r in results if r["status"] == "redirect")
-    ok = len(results) - broken - redirected
+    # A 429 is "throttled/unknown", not confirmed healthy — count it separately
+    # so it is neither hidden from the table nor tallied as ok.
+    throttled = sum(1 for r in results if r["status"] == "ok_throttled")
+    ok = len(results) - broken - redirected - throttled
 
     flagged_count = 0
     if flag_broken:
@@ -435,8 +440,7 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
     if all_results:
         shown = results
     else:
-        shown = [r for r in results
-                 if r["status"] in linkcheck.PROBLEM_STATUSES or r["status"] == "redirect"]
+        shown = [r for r in results if r["status"] != "ok"]  # everything unhealthy/unknown
     shown.sort(key=lambda r: (linkcheck.status_rank(r["status"]), r["name"].lower()))
 
     rows = [{"name": r["name"], "url": r["url"], "status": r["status"],
@@ -445,7 +449,7 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
             for r in shown]
 
     summary = (f"checked {len(results)} URL(s): {broken} broken, "
-               f"{redirected} redirected, {ok} ok")
+               f"{redirected} redirected, {throttled} throttled, {ok} ok")
     if flag_broken:
         summary += f"; filed {flagged_count} url_404 flag(s)"
     return CommandResult.ok_(
@@ -455,10 +459,12 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
 
 
 def _autoflag_broken(results: list[dict]) -> int:
-    """File url_404 flags for client_error/unreachable results, skipping dupes.
+    """Auto-file url_404 flags for confirmed-dead links, skipping dupes.
 
-    Machine-verified by construction: these results are this run's linkcheck
-    outcomes, so the highest-confidence tier stays honest.
+    Only ``client_error`` (a real HTTP 4xx) qualifies — see
+    :data:`linkcheck.DEAD_LINK_STATUSES`. A transient ``unreachable`` is not
+    auto-flagged, so "machine-verified by construction" holds: every url_404 flag
+    is backed by an actual error response, not a single flaky probe.
     """
     # Load/dedup/save once for the whole batch rather than per broken URL.
     existing = flags.load()
@@ -466,14 +472,12 @@ def _autoflag_broken(results: list[dict]) -> int:
                if f.get("status") == "pending_review"}
     new: list[dict] = []
     for r in results:
-        if r["status"] not in linkcheck.BROKEN_STATUSES:
+        if r["status"] not in linkcheck.DEAD_LINK_STATUSES:
             continue
         key = (r["name"], "url_404")
         if key in pending:
             continue
-        reason = f"link check: {r['status']}"
-        if r["code"]:
-            reason += f" (HTTP {r['code']})"
+        reason = f"link check returned HTTP {r['code']}"
         new.append(flags.build(r["name"], "url_404",
                                reason[:flags.MAX_REASON_LEN], "critical", None))
         pending.add(key)  # dedupe within this batch too
@@ -538,21 +542,27 @@ def cmd_flag_entry(entry: str, reason_type: str, reason: str,
 
 
 def _verify_url_404(entries: list[dict], entry: str) -> CommandResult | None:
-    """Confirm ``entry``'s URL is actually broken. Returns an err result to
-    abort, or ``None`` to let the flag proceed."""
+    """Confirm ``entry``'s URL returns an HTTP 4xx. Returns an err result to
+    abort, or ``None`` to let the flag proceed.
+
+    A transient ``unreachable`` does not qualify (see
+    :data:`linkcheck.DEAD_LINK_STATUSES`) — url_404 means the server actually
+    answered with a client error, not that one probe failed to connect."""
     url = _entry_url(entries, entry)
     if not url:
         return CommandResult.err(f"cannot resolve a URL for '{entry}'")
     store = linkcheck.load_checks()
     record = store.get(url)
-    if not record or record.get("status") not in linkcheck.BROKEN_STATUSES:
-        # No broken record on file — re-check this one URL right now.
+    if not record or record.get("status") not in linkcheck.DEAD_LINK_STATUSES:
+        # No confirmed-dead record on file — re-check this one URL right now.
         result = linkcheck.check_one(url)
         linkcheck.merge_checks([{"url": url, **result}])
-        if result["status"] not in linkcheck.BROKEN_STATUSES:
+        if result["status"] not in linkcheck.DEAD_LINK_STATUSES:
             return CommandResult.err(
-                f"url_404 rejected: '{entry}' resolves fine "
-                f"(status={result['status']}, code={result['code']})"
+                f"url_404 rejected: '{entry}' did not return an HTTP 4xx "
+                f"(status={result['status']}, code={result['code']}) — a "
+                "transient failure is not a confirmed dead link; use "
+                "service_discontinued with evidence if you know it is gone"
             )
     return None
 

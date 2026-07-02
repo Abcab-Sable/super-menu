@@ -33,8 +33,13 @@ _UA = "super-menu/0.1"
 
 # Statuses that mean "this entry needs a human to look at it".
 PROBLEM_STATUSES = frozenset({"client_error", "server_error", "unreachable"})
-# Statuses eligible to auto-file a url_404 flag (see plan 03 step 3 wire-up).
-BROKEN_STATUSES = frozenset({"client_error", "unreachable"})
+# Statuses that count as a *confirmed* dead link for the url_404 flag tier: an
+# actual HTTP 4xx response. ``unreachable`` (a single timeout / DNS hiccup /
+# refused connection) is deliberately excluded — one failed probe is transient,
+# not proof the link is dead, so it must never auto-file or verify the
+# highest-confidence, ``critical``-severity flag. Such links still surface in the
+# check-links table as problems; they just can't become url_404 flags on one try.
+DEAD_LINK_STATUSES = frozenset({"client_error"})
 
 # Display/sort priority: problems first, redirects next, healthy last.
 _STATUS_RANK = {
