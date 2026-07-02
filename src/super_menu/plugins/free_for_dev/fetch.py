@@ -60,12 +60,19 @@ def parse_markdown(md: str) -> list[Entry]:
         m = _ENTRY_RE.match(line)
         if not m:
             continue
+        url = m.group("url").strip()
+        # Skip the README's table-of-contents bullets — ``- [Section](#anchor)``
+        # links to in-page headings, not real services. Only genuine external
+        # http(s) links are catalog entries; anything else (``#anchor``, relative
+        # paths, ``mailto:``) would just pollute search and analyze-architecture.
+        if not url.lower().startswith(("http://", "https://")):
+            continue
         rest = m.group("rest")
         # Strip a leading separator (—, -, :, etc.) from the description.
         desc = re.sub(r"^\s*[-–—:]\s*", "", rest).strip()
         entries.append(Entry(
             name=m.group("name").strip(),
-            url=m.group("url").strip(),
+            url=url,
             description=desc,
             category=category,
         ))
