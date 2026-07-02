@@ -82,7 +82,11 @@ def test_classify_buckets():
     assert linkcheck.classify(200, u, u) == "ok"
     assert linkcheck.classify(200, u, u + "/moved") == "redirect"  # 2xx, moved
     assert linkcheck.classify(301, u, u) == "redirect"
-    assert linkcheck.classify(404, u, u) == "client_error"
+    assert linkcheck.classify(404, u, u) == "not_found"
+    assert linkcheck.classify(410, u, u) == "not_found"       # Gone
+    assert linkcheck.classify(401, u, u) == "access_denied"   # auth-gated
+    assert linkcheck.classify(403, u, u) == "access_denied"   # anti-bot/forbidden
+    assert linkcheck.classify(400, u, u) == "client_error"    # other 4xx
     assert linkcheck.classify(503, u, u) == "server_error"
     assert linkcheck.classify(429, u, u) == "ok_throttled"
     assert linkcheck.classify(None, u, u) == "unreachable"
@@ -110,7 +114,18 @@ def test_check_one_404():
 
     with _fake_net(fn):
         r = linkcheck.check_one("https://svc.example")
-    assert r["status"] == "client_error" and r["code"] == 404
+    assert r["status"] == "not_found" and r["code"] == 404
+
+
+def test_check_one_403_is_access_denied():
+    # 403 persists across the HEAD→GET retry (anti-bot); a live-but-blocked
+    # service must classify as access_denied, not a dead link.
+    def fn(url, method):
+        raise _http_error(url, 403)
+
+    with _fake_net(fn):
+        r = linkcheck.check_one("https://svc.example")
+    assert r["status"] == "access_denied" and r["code"] == 403
 
 
 def test_check_one_timeout_is_unreachable():
@@ -206,38 +221,62 @@ def test_url_404_without_record_triggers_recheck_and_files():
     assert res.ok, res.summary
     assert res.data["confidence"] == 0.95
     # The re-check result was merged into the store.
-    assert linkcheck.load_checks()["https://auth0.example"]["status"] == "client_error"
+    assert linkcheck.load_checks()["https://auth0.example"]["status"] == "not_found"
 
 
 def test_url_404_rejected_when_url_is_live():
     _reset()
     with _fake_net(lambda url, m: _FakeResp(200, url)):
         res = plugin.cmd_flag_entry("Auth0", "url_404", "link dead")
-    assert not res.ok and "did not return an HTTP 4xx" in res.summary
+    assert not res.ok and "not a confirmed dead link" in res.summary
 
 
 def _unreachable(url, method):
     raise urllib.error.URLError("timed out")
 
 
+def _forbidden(url, method):
+    raise _http_error(url, 403)
+
+
 def test_url_404_rejected_on_transient_unreachable():
     # A one-off connection failure is not a confirmed dead link — url_404 needs
-    # an actual 4xx, so a transient unreachable must be rejected, not filed.
+    # a not-found (404/410), so a transient unreachable must be rejected.
     _reset()
     with _fake_net(_unreachable):
         res = plugin.cmd_flag_entry("Auth0", "url_404", "link dead")
-    assert not res.ok and "did not return an HTTP 4xx" in res.summary
+    assert not res.ok and "not a confirmed dead link" in res.summary
+    assert flags.load() == []
+
+
+def test_url_404_rejected_on_access_denied():
+    # 401/403 is a live-but-gated response, not a dead link — must be rejected.
+    _reset()
+    with _fake_net(_forbidden):
+        res = plugin.cmd_flag_entry("Auth0", "url_404", "link dead")
+    assert not res.ok and "not a confirmed dead link" in res.summary
     assert flags.load() == []
 
 
 def test_unreachable_not_auto_flagged():
     # check-links --flag_broken must not permanently flag a flaky/unreachable
-    # probe as a critical url_404; only real 4xx responses qualify.
+    # probe as a critical url_404; only not-found (404/410) qualifies.
     _reset()
     with _fake_net(_unreachable):
         res = plugin.cmd_check_links(limit=10, flag_broken=True)
     assert "filed 0 url_404 flag(s)" in res.summary
     assert flags.load() == []
+
+
+def test_access_denied_not_auto_flagged():
+    # A 403 anti-bot/auth wall is common from live services under a generic HEAD;
+    # it must surface as a problem but never auto-file a dead-link flag.
+    _reset()
+    with _fake_net(_forbidden):
+        res = plugin.cmd_check_links(limit=10, flag_broken=True)
+    assert "filed 0 url_404 flag(s)" in res.summary
+    assert flags.load() == []
+    assert {r["status"] for r in res.data} == {"access_denied"}, res.data
 
 
 # --- wire-up: pending flag surfaces in search + flags listing --------------
@@ -324,6 +363,7 @@ if __name__ == "__main__":
     test_check_one_ok()
     test_check_one_redirect_followed()
     test_check_one_404()
+    test_check_one_403_is_access_denied()
     test_check_one_timeout_is_unreachable()
     test_check_one_429_is_not_broken()
     test_check_one_head_405_retries_get()
@@ -336,7 +376,9 @@ if __name__ == "__main__":
     test_url_404_without_record_triggers_recheck_and_files()
     test_url_404_rejected_when_url_is_live()
     test_url_404_rejected_on_transient_unreachable()
+    test_url_404_rejected_on_access_denied()
     test_unreachable_not_auto_flagged()
+    test_access_denied_not_auto_flagged()
     test_pending_flag_marks_search_row()
     test_check_links_flag_broken_files_once_and_dedupes()
     test_throttled_counted_separately_and_surfaced()

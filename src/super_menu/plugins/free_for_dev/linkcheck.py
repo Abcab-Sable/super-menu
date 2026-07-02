@@ -32,23 +32,32 @@ PLUGIN_ID = "free-for-dev"
 _UA = "super-menu/0.1"
 
 # Statuses that mean "this entry needs a human to look at it".
-PROBLEM_STATUSES = frozenset({"client_error", "server_error", "unreachable"})
-# Statuses that count as a *confirmed* dead link for the url_404 flag tier: an
-# actual HTTP 4xx response. ``unreachable`` (a single timeout / DNS hiccup /
-# refused connection) is deliberately excluded — one failed probe is transient,
-# not proof the link is dead, so it must never auto-file or verify the
-# highest-confidence, ``critical``-severity flag. Such links still surface in the
-# check-links table as problems; they just can't become url_404 flags on one try.
-DEAD_LINK_STATUSES = frozenset({"client_error"})
+PROBLEM_STATUSES = frozenset({
+    "not_found", "access_denied", "client_error", "server_error", "unreachable",
+})
+# Statuses that count as a *confirmed* dead link for the url_404 flag tier —
+# only ``not_found`` (HTTP 404/410), where the server explicitly says the
+# resource is gone. Everything else a single probe might return is a false-
+# positive risk against a *live* service and must not auto-file or verify the
+# highest-confidence, ``critical``-severity flag:
+#   - ``unreachable``  — a one-off timeout / DNS hiccup / refused connection.
+#   - ``access_denied`` (401/403) — auth-gated endpoints and Cloudflare/anti-bot
+#     challenges routinely 403 a generic HEAD from a live site.
+#   - ``client_error`` (other 4xx, e.g. 400/405/451) — ambiguous.
+# These still surface in the check-links table as problems; they just can't
+# become url_404 flags on one probe.
+DEAD_LINK_STATUSES = frozenset({"not_found"})
 
 # Display/sort priority: problems first, redirects next, healthy last.
 _STATUS_RANK = {
     "unreachable": 0,
     "server_error": 1,
-    "client_error": 2,
-    "redirect": 3,
-    "ok_throttled": 4,
-    "ok": 5,
+    "not_found": 2,
+    "client_error": 3,
+    "access_denied": 4,
+    "redirect": 5,
+    "ok_throttled": 6,
+    "ok": 7,
 }
 
 
@@ -114,6 +123,14 @@ def classify(code: int | None, requested: str, final: str) -> str:
         return "ok_throttled"
     if 300 <= code < 400:
         return "redirect"
+    if code in (404, 410):
+        # Explicitly not-found / gone — the only 4xx tier trustworthy enough to
+        # back a url_404 flag from a single probe (see DEAD_LINK_STATUSES).
+        return "not_found"
+    if code in (401, 403):
+        # Auth-gated or anti-bot: a live service commonly returns these to a
+        # generic HEAD request, so they must not become dead-link flags.
+        return "access_denied"
     if 400 <= code < 500:
         return "client_error"
     if 500 <= code < 600:

@@ -461,10 +461,12 @@ def cmd_check_links(category: str | None = None, limit: int = 100,
 def _autoflag_broken(results: list[dict]) -> int:
     """Auto-file url_404 flags for confirmed-dead links, skipping dupes.
 
-    Only ``client_error`` (a real HTTP 4xx) qualifies — see
-    :data:`linkcheck.DEAD_LINK_STATUSES`. A transient ``unreachable`` is not
-    auto-flagged, so "machine-verified by construction" holds: every url_404 flag
-    is backed by an actual error response, not a single flaky probe.
+    Only ``not_found`` (HTTP 404/410) qualifies — see
+    :data:`linkcheck.DEAD_LINK_STATUSES`. Transient ``unreachable`` and
+    live-but-blocked ``access_denied`` (401/403) are excluded, so
+    "machine-verified by construction" holds: every url_404 flag is backed by a
+    server explicitly reporting the resource gone, not a single flaky or gated
+    probe.
     """
     # Load/dedup/save once for the whole batch rather than per broken URL.
     existing = flags.load()
@@ -559,10 +561,11 @@ def _verify_url_404(entries: list[dict], entry: str) -> CommandResult | None:
         linkcheck.merge_checks([{"url": url, **result}])
         if result["status"] not in linkcheck.DEAD_LINK_STATUSES:
             return CommandResult.err(
-                f"url_404 rejected: '{entry}' did not return an HTTP 4xx "
-                f"(status={result['status']}, code={result['code']}) — a "
-                "transient failure is not a confirmed dead link; use "
-                "service_discontinued with evidence if you know it is gone"
+                f"url_404 rejected: '{entry}' is not a confirmed dead link "
+                f"(status={result['status']}, code={result['code']}; needs an "
+                "HTTP 404/410) — a transient, throttled, or access-denied probe "
+                "does not prove the link is gone. Use service_discontinued with "
+                "evidence if you know the service is gone"
             )
     return None
 
