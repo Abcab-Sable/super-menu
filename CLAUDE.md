@@ -12,8 +12,11 @@ returning a `CommandResult`; the surfaces render from that metadata.
 - `src/super_menu/mcp_server.py` — low-level `mcp.server` exposing each command as a tool.
 - `src/super_menu/plugins/free_for_dev/` — reference plugin (fetch + parse + search).
 - `src/super_menu/plugins/git_tools/` — read-only git plugin (`id = "git"`); the *reference
-  example* for subprocess-backed sources (`gitio.py` data layer + `plugin.py`). Feature-frozen —
-  do not add commands (see `plans/01-git-tools.md`).
+  example* for subprocess-backed sources (`gitio.py` data layer + `plugin.py`). **Feature-frozen —
+  do not add commands.** Every further git command duplicates strictly better tools (Claude Code
+  runs `git` directly, other MCP clients have the official `mcp-server-git`, humans have the git
+  CLI / lazygit / IDE integrations) and only bloats the MCP tool list. Its value is proving the
+  contract generalizes beyond fetch-and-index, not shipping git features.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be

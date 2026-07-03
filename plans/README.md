@@ -1,24 +1,23 @@
 # Implementation plans
 
-One plan per phase of the [FEATURE_IDEAS.md](../FEATURE_IDEAS.md) roadmap. Each plan is
-self-contained: goal, file layout, command specs against the real plugin contract
-(`src/super_menu/core/plugin.py`), data shapes, edge cases, and exit criteria.
+The roadmap in [FEATURE_IDEAS.md](../FEATURE_IDEAS.md) is now fully resolved. The plans
+that shipped (git-tools, smart discovery, freshness signals) have been removed — the code
+is the source of truth for those, and their history lives in git. Only the two plans that
+are *not* settled by code remain here:
 
-| Plan | Feature | Depends on | Status |
-|------|---------|------------|--------|
-| [01-git-tools](01-git-tools.md) | git-tools plugin | — | **Closed** — tranche 1 shipped ([PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)); tranche 2 cancelled; plugin reframed as the subprocess-backed reference example |
-| [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | **Shipped** ([PR #7](https://github.com/Abcab-Sable/super-menu/pull/7)) |
-| [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | **Shipped** (check-links, flag-entry, flags, dismiss-flag) |
-| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | **Closed — NO-GO** (2026-07-03): upstream bans AI-authored edits (`CONTRIBUTING.md` + agent-directed `AGENTS.md`/`CLAUDE.md`); probe PR intentionally not sent |
-| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | **Shelved** — gate 04 returned NO-GO; revive only against a different upstream |
+| Plan | Feature | Status |
+|------|---------|--------|
+| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | **Closed — NO-GO** (2026-07-03): upstream bans AI-authored edits (`CONTRIBUTING.md` + agent-directed `AGENTS.md`/`CLAUDE.md`); probe PR intentionally not sent |
+| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | **Shelved** — gate 04 returned NO-GO; the design is kept for possible revival against a *different* upstream that permits tool-assisted human-reviewed PRs |
+
+Plan 04 is the decision record for why 05 is shelved; plan 05 is the parked design.
+Shipped-plan history (01 git-tools closed, 02 smart-discovery, 03 freshness-signals):
+see `git log` and the closed PRs (#5, #7).
 
 Lesson recorded from plan 01: rank plans by *who stops using their current tool for
 this*, not by how cheap they are to build. Low effort × low value is still low value.
 
-Deferred (no plan until evidence demands one): semantic search/embeddings, structured
-extraction. See "Deferred" in FEATURE_IDEAS.md for the bar they must clear.
-
-## Constraints that apply to every plan
+## Constraints (apply to plan 05 if revived)
 
 - **The contract is the contract.** Handlers return `CommandResult` (`ok_`/`err`), `data`
   JSON-serializable, `kind` ∈ table/list/text/json. `Param.type` ∈ str/int/float/bool —
