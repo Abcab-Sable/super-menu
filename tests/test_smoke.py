@@ -1,14 +1,18 @@
 """End-to-end smoke tests: discovery, parsing, CLI dispatch, and TUI boot."""
 import asyncio
+import os
+import tempfile
 
 from super_menu.core.registry import Registry, default_registry
 from super_menu.plugins.free_for_dev import fetch
+from super_menu.plugins.pentest import recon
 
 
 def test_plugin_discovered():
     reg = default_registry()
     assert reg.get("free-for-dev") is not None
     assert reg.get("git") is not None
+    assert reg.get("pentest") is not None
 
 
 def test_parse_markdown():
@@ -69,6 +73,54 @@ def test_search_missing_required_param():
     assert "query" in result.summary
 
 
+def test_pentest_parse_jsonl():
+    # Blank lines, a non-JSON notice line, and a valid object interleaved.
+    raw = (
+        '{"host": "a.example.com", "source": "crtsh"}\n'
+        "\n"
+        "[INF] running with 1 source\n"
+        '{"host": "b.example.com", "source": "wayback"}\n'
+    )
+    objs = recon.parse_jsonl(raw)
+    rows = recon.rows_subdomains(objs)
+    assert [r["host"] for r in rows] == ["a.example.com", "b.example.com"]
+    assert rows[0]["source"] == "crtsh"
+
+
+def test_pentest_scope_matching():
+    patterns = ["example.com", "*.corp.example", "10.0.0.0/24", "192.168.1.5"]
+    # Apex, subdomain, and wildcard-domain matches.
+    assert recon.in_scope("example.com", patterns)
+    assert recon.in_scope("https://api.example.com/login", patterns)
+    assert recon.in_scope("host.corp.example:8443", patterns)
+    # CIDR membership and exact IP.
+    assert recon.in_scope("10.0.0.42", patterns)
+    assert recon.in_scope("192.168.1.5", patterns)
+    # Out of scope: unrelated domain, look-alike suffix, IP outside the CIDR.
+    assert not recon.in_scope("evil.com", patterns)
+    assert not recon.in_scope("notexample.com", patterns)
+    assert not recon.in_scope("10.0.1.1", patterns)
+
+
+def test_pentest_scope_fail_closed():
+    # An empty scope must refuse every scan — checked before any binary runs, so
+    # this passes whether or not the recon tools are installed. Point the data
+    # dir at an isolated temp home so we never touch the user's real scope file.
+    plugin = default_registry().get("pentest")
+    prev = os.environ.get("SUPER_MENU_HOME")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["SUPER_MENU_HOME"] = tmp
+        try:
+            result = plugin.command("subdomains").run({"domain": "example.com"})
+        finally:
+            if prev is None:
+                os.environ.pop("SUPER_MENU_HOME", None)
+            else:
+                os.environ["SUPER_MENU_HOME"] = prev
+    assert not result.ok
+    assert "scope" in result.summary
+
+
 def test_tui_boots():
     from super_menu.tui.app import SuperMenuApp
 
@@ -90,5 +142,8 @@ if __name__ == "__main__":
     test_parse_markdown_skips_toc_and_relative_links()
     test_command_run_and_result_shape()
     test_search_missing_required_param()
+    test_pentest_parse_jsonl()
+    test_pentest_scope_matching()
+    test_pentest_scope_fail_closed()
     test_tui_boots()
     print("all smoke tests passed")
