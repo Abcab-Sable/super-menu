@@ -30,7 +30,6 @@ from textual.widgets import (
     Checkbox,
     DataTable,
     Footer,
-    Header,
     Input,
     Select,
     Static,
@@ -44,7 +43,17 @@ from super_menu.core.plugin import Command, CommandResult, Param, Plugin
 FieldWidget = Union[Input, Checkbox, Select]
 
 # Curated Textual themes cycled with the ``t`` binding.
-THEMES = ["tokyo-night", "nord", "gruvbox", "textual-dark", "textual-light"]
+THEMES = [
+    "tokyo-night",
+    "catppuccin-mocha",
+    "dracula",
+    "nord",
+    "gruvbox",
+    "monokai",
+    "flexoki",
+    "textual-dark",
+    "textual-light",
+]
 
 
 class PluginCommandProvider(Provider):
@@ -85,64 +94,124 @@ class SuperMenuApp(App):
     COMMANDS = App.COMMANDS | {PluginCommandProvider}
 
     CSS = """
-    Screen { layout: horizontal; }
+    /* ── chrome ─────────────────────────────────────────── */
+    Screen {
+        layout: vertical;
+        background: $background;
+    }
+    #appbar {
+        dock: top;
+        height: 1;
+        padding: 0 2;
+        background: $panel;
+    }
+    #brand { width: auto; }
+    #stats { width: 1fr; text-align: right; color: $text-muted; }
+    #body { height: 1fr; padding: 1 2 0 2; }
 
-    #sidebar {
-        width: 34;
-        min-width: 26;
-        padding: 0 1;
-        border: round $primary 60%;
+    /* ── panels ─────────────────────────────────────────── */
+    #sidebar, #form, #results {
+        background: $surface;
+        border: round $primary 45%;
         border-title-color: $text-muted;
         border-title-style: bold;
-        scrollbar-gutter: stable;
+        border-subtitle-color: $text-muted;
     }
-    #sidebar:focus-within {
+    #sidebar:focus-within, #form:focus-within, #results:focus-within {
         border: round $accent;
         border-title-color: $accent;
     }
 
+    #sidebar {
+        width: 32;
+        min-width: 24;
+        margin-right: 2;
+        padding: 1 1;
+        scrollbar-gutter: stable;
+    }
     #form {
         height: auto;
         max-height: 60%;
+        margin-bottom: 1;
         padding: 0 2 1 2;
-        border: round $primary 60%;
-        border-title-color: $text-muted;
-        border-title-style: bold;
     }
-    #form:focus-within {
-        border: round $accent;
-        border-title-color: $accent;
+    #results { height: 1fr; padding: 0 2 1 2; }
+
+    /* ── sidebar tree ───────────────────────────────────── */
+    Tree { background: transparent; }
+    Tree > .tree--guides { color: $primary 40%; }
+    Tree > .tree--guides-hover { color: $accent 60%; }
+    Tree > .tree--guides-selected { color: $accent; }
+    Tree > .tree--cursor { background: $accent 30%; text-style: bold; }
+    Tree > .tree--highlight-line { background: $boost; }
+
+    /* ── welcome ────────────────────────────────────────── */
+    #hero-banner { margin-top: 1; text-wrap: nowrap; }
+    #hero-tagline { margin-top: 1; color: $text-muted; text-style: italic; }
+    .plugin-card {
+        height: auto;
+        margin-top: 1;
+        padding: 0 1;
+        border: round $primary 35%;
+        background: $boost;
+    }
+    .plugin-card:hover { border: round $accent 70%; }
+    #hints { margin-top: 1; color: $text-muted; }
+
+    /* clickable plugin / command names rendered as action links */
+    #form, .plugin-card {
+        link-color: $text;
+        link-style: bold;
+        link-background: transparent;
+        link-color-hover: $accent;
+        link-background-hover: transparent;
+        link-style-hover: bold;
     }
 
-    #results {
-        height: 1fr;
-        padding: 0 2 1 2;
-        border: round $primary 60%;
-        border-title-color: $text-muted;
-        border-title-style: bold;
-    }
-    #results:focus-within {
-        border: round $accent;
-        border-title-color: $accent;
-    }
-
-    .field-label { margin-top: 1; text-style: bold; }
-    .field-help { color: $text-muted; }
-    .muted { color: $text-muted; }
+    /* ── form ───────────────────────────────────────────── */
     .command-help { color: $text-muted; margin-top: 1; }
+    .field-label { margin-top: 1; }
+    .field-help { color: $text-muted; text-style: italic; }
+    .muted { color: $text-muted; }
 
-    Checkbox { margin-top: 1; }
+    #form Input, #form Select SelectCurrent {
+        border: tall $primary 35%;
+        background: $boost;
+    }
+    #form Input:focus { border: tall $accent; background: $surface; }
+    #form Select:focus SelectCurrent { border: tall $accent; }
+    #form Checkbox { margin-top: 1; background: transparent; }
 
     #actions { height: auto; margin-top: 1; }
-    #actions Button { margin-right: 2; }
+    #actions Button { margin-right: 2; min-width: 16; }
 
-    #summary { padding: 1 0; }
-    .error-box {
-        border: round $error;
-        padding: 0 1;
+    /* ── results ────────────────────────────────────────── */
+    #placeholder {
+        height: 1fr;
         margin-top: 1;
+        color: $text-muted;
+        text-style: italic;
+        content-align: center middle;
+        hatch: right $primary 10%;
     }
-    #results DataTable { height: auto; }
+    #summary-row { height: auto; margin-top: 1; }
+    .result-chip { width: auto; padding: 0 1; text-style: bold; }
+    .result-chip.-ok { color: $success; background: $success 15%; }
+    .result-chip.-err { color: $error; background: $error 15%; }
+    #result-summary { width: 1fr; margin-left: 1; }
+
+    #results DataTable {
+        height: auto;
+        margin-top: 1;
+        background: transparent;
+    }
+    DataTable > .datatable--header {
+        background: transparent;
+        color: $accent;
+        text-style: bold;
+    }
+    DataTable > .datatable--cursor { background: $accent 35%; }
+    DataTable > .datatable--hover { background: $boost; }
     """
 
     BINDINGS = [
@@ -160,22 +229,26 @@ class SuperMenuApp(App):
         self._inputs: dict[str, FieldWidget] = {}
         self._current: Optional[tuple[Plugin, Command]] = None
         n_cmds = sum(len(p.commands()) for p in self.registry.plugins)
-        self.sub_title = f"{len(self.registry.plugins)} plugins · {n_cmds} commands"
+        self._stats = f"{len(self.registry.plugins)} plugins · {n_cmds} commands"
+        self.sub_title = self._stats
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        with Horizontal():
+        with Horizontal(id="appbar"):
+            yield Static("[b $accent]☰[/] [b]super-menu[/]", id="brand")
+            yield Static(self._stats, id="stats")
+        with Horizontal(id="body"):
             tree: Tree[dict] = Tree("super-menu", id="sidebar")
             tree.show_root = False
             tree.guide_depth = 3
             tree.border_title = "Plugins"
             for plugin in self.registry.plugins:
+                cmds = plugin.commands()
                 node = tree.root.add(
-                    f"{plugin.icon} [b]{escape(plugin.name)}[/]",
+                    f"{plugin.icon} [b]{escape(plugin.name)}[/] [dim]{len(cmds)}[/]",
                     data={"type": "plugin", "plugin": plugin.id},
                     expand=True,
                 )
-                for cmd in plugin.commands():
+                for cmd in cmds:
                     node.add_leaf(
                         escape(cmd.name),
                         data={"type": "command", "plugin": plugin.id, "command": cmd.name},
@@ -183,7 +256,7 @@ class SuperMenuApp(App):
             yield tree
             with Vertical(id="main"):
                 form = VerticalScroll(id="form")
-                form.border_title = "Command"
+                form.border_title = "Welcome"
                 yield form
                 results = VerticalScroll(id="results")
                 results.border_title = "Results"
@@ -193,6 +266,9 @@ class SuperMenuApp(App):
     async def on_mount(self) -> None:
         self.theme = THEMES[0]
         await self._show_welcome()
+        await self.query_one("#results", VerticalScroll).mount(
+            Static("· run a command to see its output here ·", id="placeholder")
+        )
         self.query_one("#sidebar", Tree).focus()
 
     # ----- navigation -------------------------------------------------------
@@ -244,38 +320,72 @@ class SuperMenuApp(App):
         self.theme = THEMES[(idx + 1) % len(THEMES)]
         self.notify(self.theme, title="theme", timeout=1.5)
 
+    async def action_open_plugin(self, plugin_id: str) -> None:
+        """Markup-link target: welcome-screen plugin cards."""
+        plugin = self.registry.get(plugin_id)
+        if plugin is None:
+            return
+        tree = self.query_one("#sidebar", Tree)
+        for node in tree.root.children:
+            d = node.data or {}
+            if d.get("type") == "plugin" and d.get("plugin") == plugin_id:
+                node.expand()
+                tree.move_cursor(node)
+                break
+        await self._show_plugin(plugin)
+
+    async def action_open_command(self, plugin_id: str, command_name: str) -> None:
+        """Markup-link target: command names in the plugin overview."""
+        await self.select_command(plugin_id, command_name)
+
     # ----- info panels ------------------------------------------------------
     async def _show_welcome(self) -> None:
         form = self.query_one("#form", VerticalScroll)
         form.border_title = "Welcome"
+        form.border_subtitle = ""
         await form.remove_children()
-        lines: list[Widget] = [
-            Static("Pick a command from the left, fill in its parameters, and run it.",
-                   classes="command-help"),
+        banner = (
+            "[b $primary]█▀ █░█ █▀█ █▀▀ █▀█[/]   [b $accent]█▀▄▀█ █▀▀ █▄░█ █░█[/]\n"
+            "[b $primary]▄█ █▄█ █▀▀ ██▄ █▀▄[/]   [b $accent]█░▀░█ ██▄ █░▀█ █▄█[/]"
+        )
+        widgets: list[Widget] = [
+            Static(banner, id="hero-banner"),
+            Static("one menu, every surface — pick a command, fill the form, run it",
+                   id="hero-tagline"),
         ]
         for plugin in self.registry.plugins:
-            lines.append(Static(f"{plugin.icon} [b]{escape(plugin.name)}[/]",
-                                classes="field-label"))
+            n = len(plugin.commands())
+            card = (
+                f"[$accent]{plugin.icon}[/] "
+                f"[@click=app.open_plugin('{plugin.id}')]{escape(plugin.name)}[/] "
+                f"[dim]· {n} command{'s' if n != 1 else ''}[/]"
+            )
             if plugin.description:
-                lines.append(Static(escape(plugin.description), classes="field-help"))
-        lines.append(Static(
-            "[b]↑/↓[/] navigate · [b]enter[/] select · [b]r[/] run · "
-            "[b]/[/] search commands · [b]t[/] theme · [b]q[/] quit",
-            classes="command-help",
+                card += f"\n[i $text-muted]{escape(plugin.description)}[/]"
+            widgets.append(Static(card, classes="plugin-card"))
+        widgets.append(Static(
+            "[b $accent]enter[/] select · [b $accent]r[/] run · [b $accent]/[/] search · "
+            "[b $accent]t[/] theme · [b $accent]q[/] quit",
+            id="hints",
         ))
-        await form.mount_all(lines)
+        await form.mount_all(widgets)
         self._current = None
         self._inputs = {}
 
     async def _show_plugin(self, plugin: Plugin) -> None:
         form = self.query_one("#form", VerticalScroll)
         form.border_title = f"{plugin.icon} {plugin.name}"
+        form.border_subtitle = plugin.id
         await form.remove_children()
         widgets: list[Widget] = []
         if plugin.description:
             widgets.append(Static(escape(plugin.description), classes="command-help"))
         for cmd in plugin.commands():
-            widgets.append(Static(f"[b]{escape(cmd.name)}[/]", classes="field-label"))
+            widgets.append(Static(
+                f"[$accent]▸[/] "
+                f"[@click=app.open_command('{plugin.id}', '{cmd.name}')]{escape(cmd.name)}[/]",
+                classes="field-label",
+            ))
             widgets.append(Static(escape(cmd.help), classes="field-help"))
         await form.mount_all(widgets)
         self._current = None
@@ -286,6 +396,7 @@ class SuperMenuApp(App):
         self._current = (plugin, command)
         form = self.query_one("#form", VerticalScroll)
         form.border_title = f"{plugin.icon} {plugin.name} › {command.name}"
+        form.border_subtitle = "r · run"
         await form.remove_children()
         self._inputs = {}
         widgets: list[Widget] = [Static(escape(command.help), classes="command-help")]
@@ -298,13 +409,14 @@ class SuperMenuApp(App):
                     widgets.append(Static(escape(p.help), classes="field-help"))
             else:
                 req = " [$error]*[/]" if p.required else ""
-                widgets.append(Static(f"[b]{escape(p.name)}[/]{req}", classes="field-label"))
+                widgets.append(Static(f"[$accent]▸[/] [b]{escape(p.name)}[/]{req}",
+                                      classes="field-label"))
                 if p.help:
                     widgets.append(Static(escape(p.help), classes="field-help"))
                 widgets.append(field)
         if not command.params:
             widgets.append(Static("No parameters.", classes="field-help"))
-        widgets.append(Horizontal(Button("Run  (r)", variant="primary", id="run-btn"),
+        widgets.append(Horizontal(Button("▶ Run", variant="primary", id="run-btn"),
                                   id="actions"))
         await form.mount_all(widgets)
         first = next(iter(self._inputs.values()), None)
@@ -370,6 +482,7 @@ class SuperMenuApp(App):
     async def _run_command(self, command: Command, raw: dict[str, Any]) -> None:
         results = self.query_one("#results", VerticalScroll)
         results.border_title = f"Results · {command.name}"
+        results.border_subtitle = "running…"
         await results.remove_children()
         results.loading = True
         start = time.monotonic()
@@ -392,18 +505,21 @@ class SuperMenuApp(App):
     async def _render_result(self, result: CommandResult, elapsed: float) -> None:
         panel = self.query_one("#results", VerticalScroll)
         await panel.remove_children()
-        if not result.ok:
-            await panel.mount(
-                Static(f"[b $error]✗ error[/]  {escape(result.summary)}",
-                       classes="error-box")
-            )
-            return
         meta = f"{elapsed:.1f}s"
-        if isinstance(result.data, list):
+        if result.ok and isinstance(result.data, list):
             meta = f"{len(result.data)} rows · {meta}"
-        await panel.mount(Static(
-            f"[b $success]✓[/] {escape(result.summary or 'done')}  [dim]· {meta}[/]",
-            id="summary",
+        panel.border_subtitle = meta
+        if not result.ok:
+            await panel.mount(Horizontal(
+                Static("✗ error", classes="result-chip -err"),
+                Static(escape(result.summary), id="result-summary"),
+                id="summary-row",
+            ))
+            return
+        await panel.mount(Horizontal(
+            Static("✓ ok", classes="result-chip -ok"),
+            Static(escape(result.summary or "done"), id="result-summary"),
+            id="summary-row",
         ))
         widget = self._data_widget(result)
         if widget is not None:
@@ -429,9 +545,9 @@ class SuperMenuApp(App):
             except Exception:
                 pass  # non-serializable payload: fall through to plain repr
         if isinstance(data, list):
-            return Static("\n".join(f"• {escape(str(item))}" for item in data))
+            return Static("\n".join(f"[$accent]▪[/] {escape(str(item))}" for item in data))
         if isinstance(data, dict):
-            return Static("\n".join(f"[b]{escape(str(k))}[/]: {escape(str(v))}"
+            return Static("\n".join(f"[b $accent]{escape(str(k))}[/]  {escape(str(v))}"
                                     for k, v in data.items()))
         return Static(escape(str(data)))
 
