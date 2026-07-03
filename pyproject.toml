@@ -5,7 +5,7 @@ description = "An extensible super terminal menu — Textual TUI, headless CLI, 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "textual>=0.80",
+    "textual>=8.2.8",
 ]
 
 [project.optional-dependencies]
