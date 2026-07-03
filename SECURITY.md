@@ -17,10 +17,10 @@ Please include:
 
 ## Scope
 
-super-menu can run plugins that shell out to external tools (e.g. the `git` and
-pentest recon plugins). Reports about command injection, unsafe subprocess
-handling, path traversal in cache/index locations, or secret leakage through
-command output are in scope and especially welcome.
+super-menu can run plugins that shell out to external tools (e.g. the `git`
+plugin). Reports about command injection, unsafe subprocess handling, path
+traversal in cache/index locations, or secret leakage through command output
+are in scope and especially welcome.
 
 ## Supported Versions
 
