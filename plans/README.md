@@ -9,8 +9,8 @@ self-contained: goal, file layout, command specs against the real plugin contrac
 | [01-git-tools](01-git-tools.md) | git-tools plugin | — | **Closed** — tranche 1 shipped ([PR #5](https://github.com/Abcab-Sable/super-menu/pull/5)); tranche 2 cancelled; plugin reframed as the subprocess-backed reference example |
 | [02-smart-discovery](02-smart-discovery.md) | Keyword search, suggest-alternatives, analyze-architecture, annotations | — | **Shipped** ([PR #7](https://github.com/Abcab-Sable/super-menu/pull/7)) |
 | [03-freshness-signals](03-freshness-signals.md) | check-links, flag-entry, confidence scoring | 02 (search layer, storage) | **Shipped** (check-links, flag-entry, flags, dismiss-flag) |
-| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | Planned (process, not code) |
-| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | Gated (high risk) |
+| [04-upstream-gate](04-upstream-gate.md) | Validate free-for-dev accepts contributions | 03 (check-links findings) | **Closed — NO-GO** (2026-07-03): upstream bans AI-authored edits (`CONTRIBUTING.md` + agent-directed `AGENTS.md`/`CLAUDE.md`); probe PR intentionally not sent |
+| [05-pr-proposals](05-pr-proposals.md) | Proposal review panel, propose-pr, GitHub integration | 03 + gate pass in 04 | **Shelved** — gate 04 returned NO-GO; revive only against a different upstream |
 
 Lesson recorded from plan 01: rank plans by *who stops using their current tool for
 this*, not by how cheap they are to build. Low effort × low value is still low value.
