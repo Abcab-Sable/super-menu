@@ -122,6 +122,12 @@ def test_pentest_scope_multi_target():
                 raise AssertionError("multi-target scope gate is fail-open")
             # All-in-scope multi-target passes without raising.
             recon.require_scope("api.example.com www.example.com")
+            # --add accepts the same multi-value form: two usable patterns,
+            # not one dead joined entry.
+            recon.add_scope("a.com b.com")
+            scope = recon.load_scope()
+            assert "a.com" in scope and "b.com" in scope
+            assert "a.com b.com" not in scope
         finally:
             if prev is None:
                 os.environ.pop("SUPER_MENU_HOME", None)
