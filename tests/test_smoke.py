@@ -102,6 +102,41 @@ def test_pentest_scope_matching():
     assert not recon.in_scope("10.0.1.1", patterns)
 
 
+def test_pentest_scope_multi_target():
+    # A multi-target string must be split and every host validated; an
+    # out-of-scope host riding behind an in-scope suffix must be refused.
+    assert recon.split_targets("evil.com, api.example.com") == [
+        "evil.com", "api.example.com",
+    ]
+    prev = os.environ.get("SUPER_MENU_HOME")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["SUPER_MENU_HOME"] = tmp
+        try:
+            recon.add_scope("example.com")
+            # Out-of-scope host smuggled in behind an in-scope suffix: refused.
+            try:
+                recon.require_scope("evil.com,api.example.com")
+            except recon.ToolError as exc:
+                assert "evil.com" in str(exc)
+            else:  # pragma: no cover
+                raise AssertionError("multi-target scope gate is fail-open")
+            # All-in-scope multi-target passes without raising.
+            recon.require_scope("api.example.com www.example.com")
+        finally:
+            if prev is None:
+                os.environ.pop("SUPER_MENU_HOME", None)
+            else:
+                os.environ["SUPER_MENU_HOME"] = prev
+
+
+def test_pentest_rows_ports_nested():
+    # naabu builds that nest the port must surface the scalar, not the dict.
+    flat = recon.rows_ports([{"host": "h", "ip": "1.2.3.4", "port": 80}])
+    nested = recon.rows_ports([{"host": "h", "ip": "1.2.3.4", "port": {"Port": 443}}])
+    assert flat[0]["port"] == 80
+    assert nested[0]["port"] == 443
+
+
 def test_pentest_scope_fail_closed():
     # An empty scope must refuse every scan — checked before any binary runs, so
     # this passes whether or not the recon tools are installed. Point the data
@@ -144,6 +179,8 @@ if __name__ == "__main__":
     test_search_missing_required_param()
     test_pentest_parse_jsonl()
     test_pentest_scope_matching()
+    test_pentest_scope_multi_target()
+    test_pentest_rows_ports_nested()
     test_pentest_scope_fail_closed()
     test_tui_boots()
     print("all smoke tests passed")
