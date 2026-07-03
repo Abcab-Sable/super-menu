@@ -12,6 +12,7 @@ never freeze the UI. Ctrl+P / ``/`` opens a fuzzy palette over every command.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from functools import partial
 from typing import Any, Iterator, Optional, Union
@@ -54,6 +55,38 @@ THEMES = [
     "textual-dark",
     "textual-light",
 ]
+
+# Welcome banner, wide (one line per row, 39 cells) and narrow (stacked words,
+# 18 cells) variants; picked in ``_show_welcome`` from the terminal width.
+BANNER_WIDE_WIDTH = 39
+BANNER_WIDE = (
+    "[b $primary]█▀ █░█ █▀█ █▀▀ █▀█[/]   [b $accent]█▀▄▀█ █▀▀ █▄░█ █░█[/]\n"
+    "[b $primary]▄█ █▄█ █▀▀ ██▄ █▀▄[/]   [b $accent]█░▀░█ ██▄ █░▀█ █▄█[/]"
+)
+BANNER_NARROW = (
+    "[b $primary]█▀ █░█ █▀█ █▀▀ █▀█[/]\n"
+    "[b $primary]▄█ █▄█ █▀▀ ██▄ █▀▄[/]\n"
+    "[b $accent]█▀▄▀█ █▀▀ █▄░█ █░█[/]\n"
+    "[b $accent]█░▀░█ ██▄ █░▀█ █▄█[/]"
+)
+# Horizontal cells around the form's content: sidebar (32) + its margin (2) +
+# #body padding (4) + form border (2) + form padding (4).
+FORM_CHROME_WIDTH = 44
+
+_SAFE_ACTION_ARG = re.compile(r"^[\w.-]+$")
+
+
+def action_link(label: str, action: str, *args: str) -> str:
+    """Wrap ``label`` (already markup-escaped) in an ``@click`` action link.
+
+    Arguments are embedded with ``repr`` and only when they are plain tokens;
+    anything else falls back to unlinked text rather than risk producing
+    markup that Textual's action parser rejects into a silent no-op link.
+    """
+    if all(_SAFE_ACTION_ARG.match(a) for a in args):
+        call = f"{action}({', '.join(repr(a) for a in args)})"
+        return f"[@click={call}]{label}[/]"
+    return label
 
 
 class PluginCommandProvider(Provider):
@@ -344,10 +377,8 @@ class SuperMenuApp(App):
         form.border_title = "Welcome"
         form.border_subtitle = ""
         await form.remove_children()
-        banner = (
-            "[b $primary]█▀ █░█ █▀█ █▀▀ █▀█[/]   [b $accent]█▀▄▀█ █▀▀ █▄░█ █░█[/]\n"
-            "[b $primary]▄█ █▄█ █▀▀ ██▄ █▀▄[/]   [b $accent]█░▀░█ ██▄ █░▀█ █▄█[/]"
-        )
+        form_width = self.size.width - FORM_CHROME_WIDTH
+        banner = BANNER_WIDE if form_width >= BANNER_WIDE_WIDTH else BANNER_NARROW
         widgets: list[Widget] = [
             Static(banner, id="hero-banner"),
             Static("one menu, every surface — pick a command, fill the form, run it",
@@ -355,9 +386,9 @@ class SuperMenuApp(App):
         ]
         for plugin in self.registry.plugins:
             n = len(plugin.commands())
+            name_link = action_link(escape(plugin.name), "app.open_plugin", plugin.id)
             card = (
-                f"[$accent]{plugin.icon}[/] "
-                f"[@click=app.open_plugin('{plugin.id}')]{escape(plugin.name)}[/] "
+                f"[$accent]{plugin.icon}[/] {name_link} "
                 f"[dim]· {n} command{'s' if n != 1 else ''}[/]"
             )
             if plugin.description:
@@ -381,11 +412,9 @@ class SuperMenuApp(App):
         if plugin.description:
             widgets.append(Static(escape(plugin.description), classes="command-help"))
         for cmd in plugin.commands():
-            widgets.append(Static(
-                f"[$accent]▸[/] "
-                f"[@click=app.open_command('{plugin.id}', '{cmd.name}')]{escape(cmd.name)}[/]",
-                classes="field-label",
-            ))
+            cmd_link = action_link(escape(cmd.name), "app.open_command",
+                                   plugin.id, cmd.name)
+            widgets.append(Static(f"[$accent]▸[/] {cmd_link}", classes="field-label"))
             widgets.append(Static(escape(cmd.help), classes="field-help"))
         await form.mount_all(widgets)
         self._current = None
