@@ -15,7 +15,10 @@ from typing import Any, Callable, Literal, Optional
 Handler = Callable[..., "CommandResult"]
 
 ParamType = Literal["str", "int", "float", "bool"]
-ResultKind = Literal["table", "list", "text", "json"]
+# "geojson": ``data`` is a GeoJSON object (typically a FeatureCollection). The TUI
+# and CLI rasterize it to a braille map; MCP/``--json`` get the raw GeoJSON. Any
+# plugin emitting spatial data lights up as a map with no surface-specific code.
+ResultKind = Literal["table", "list", "text", "json", "geojson"]
 
 
 @dataclass

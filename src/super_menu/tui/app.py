@@ -38,10 +38,35 @@ from textual.widgets import (
 )
 from textual.widgets.tree import TreeNode
 
+from super_menu.core import braille
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult, Param, Plugin
 
 FieldWidget = Union[Input, Checkbox, Select]
+
+
+class GeoMap(Widget):
+    """Renders a ``kind="geojson"`` payload as a braille map that reflows to the
+    widget's size. Generic — it knows nothing about routes, only GeoJSON."""
+
+    can_focus = False
+
+    def __init__(self, geojson: dict, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._geojson = geojson
+
+    def render(self) -> Text:
+        w = self.size.width or 48
+        h = self.size.height or 16
+        lines = braille.render_geojson(self._geojson, w, h)
+        text = Text("\n".join(lines), no_wrap=True)
+        legend = braille.legend(self._geojson)
+        if legend:
+            text.append(f"\n{legend}", style="dim")
+        return text
+
+    def on_resize(self) -> None:
+        self.refresh()
 
 # Curated Textual themes cycled with the ``t`` binding.
 THEMES = [
@@ -232,6 +257,15 @@ class SuperMenuApp(App):
     .result-chip.-ok { color: $success; background: $success 15%; }
     .result-chip.-err { color: $error; background: $error 15%; }
     #result-summary { width: 1fr; margin-left: 1; }
+
+    GeoMap {
+        width: 1fr;
+        height: 18;
+        margin-top: 1;
+        padding: 0 1;
+        color: $accent;
+        border: round $primary 35%;
+    }
 
     #results DataTable {
         height: auto;
@@ -458,7 +492,10 @@ class SuperMenuApp(App):
         if p.choices:
             return Select(
                 [(c, c) for c in p.choices],
-                value=p.default if p.default is not None else Select.BLANK,
+                # Select.BLANK is a dead alias equal to False in current Textual;
+                # the real "no selection" sentinel is Select.NULL. Passing False
+                # crashes the widget on mount for any choices param without a default.
+                value=p.default if p.default is not None else Select.NULL,
                 allow_blank=True,
                 prompt=f"({p.type})",
                 id=f"param-{p.name}",
@@ -475,7 +512,7 @@ class SuperMenuApp(App):
             if isinstance(widget, Checkbox):
                 raw[name] = widget.value
             elif isinstance(widget, Select):
-                if widget.value is not Select.BLANK:
+                if widget.value is not Select.NULL:
                     raw[name] = widget.value
             else:
                 val = widget.value.strip()
@@ -558,6 +595,8 @@ class SuperMenuApp(App):
         data = result.data
         if data is None:
             return None
+        if result.kind == "geojson" and isinstance(data, dict):
+            return GeoMap(data)
         if result.kind == "table" and isinstance(data, list):
             if not data:
                 return Static("no rows", classes="muted")

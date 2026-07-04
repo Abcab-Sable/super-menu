@@ -12,9 +12,11 @@ the command's params, plus ``--json`` to emit the raw structured result.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from typing import Any
 
+from super_menu.core import braille
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult
 
@@ -59,7 +61,9 @@ def _print_result(result: CommandResult) -> int:
     if result.summary:
         print(result.summary)
     data = result.data
-    if result.kind == "table" and isinstance(data, list) and data:
+    if result.kind == "geojson" and isinstance(data, dict):
+        _print_map(data)
+    elif result.kind == "table" and isinstance(data, list) and data:
         cols = result.columns or list(data[0].keys())
         _print_table(data, cols)
     elif result.kind in ("json",) or isinstance(data, (dict,)):
@@ -83,6 +87,15 @@ def _print_table(rows: list[dict], cols: list[str], max_width: int = 60) -> None
     print("  ".join("-" * widths[c] for c in cols))
     for r in rows:
         print("  ".join(cell(r, c).ljust(widths[c]) for c in cols))
+
+
+def _print_map(geojson: dict) -> None:
+    cols = min(max(shutil.get_terminal_size((80, 24)).columns - 2, 40), 100)
+    for line in braille.render_geojson(geojson, width=cols, height=20):
+        print(line)
+    legend = braille.legend(geojson)
+    if legend:
+        print(legend)
 
 
 def _list_plugins() -> int:

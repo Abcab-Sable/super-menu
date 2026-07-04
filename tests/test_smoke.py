@@ -84,6 +84,44 @@ def test_tui_boots():
     asyncio.run(_run())
 
 
+def test_tui_opens_dropdown_form():
+    """Regression: opening a command whose choices param has no default must not
+    crash (Select.BLANK == False in current Textual crashed the form on mount)."""
+    from super_menu.tui.app import SuperMenuApp
+    from textual.widgets import Select
+
+    async def _run():
+        app = SuperMenuApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # free-for-dev 'annotate' has an optional 'tag' choices param.
+            await app.select_command("free-for-dev", "annotate")
+            await pilot.pause()
+            # a Select mounted and the app is still alive (would have raised on mount)
+            assert app.query(Select)
+
+    asyncio.run(_run())
+
+
+def test_tui_renders_geojson_map():
+    """A kind='geojson' result renders as a GeoMap braille widget."""
+    from super_menu.tui.app import SuperMenuApp, GeoMap
+    from super_menu.plugins.route_avoider import plugin as ra
+
+    async def _run():
+        app = SuperMenuApp()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            res = ra.cmd_route(origin="Leeds", destination="Aberystwyth",
+                               avoid="53.4,-2.9,25,Zone")
+            assert res.kind == "geojson"
+            await app._render_result(res, 0.1)
+            await pilot.pause()
+            assert app.query_one(GeoMap)
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     test_plugin_discovered()
     test_parse_markdown()
@@ -91,4 +129,6 @@ if __name__ == "__main__":
     test_command_run_and_result_shape()
     test_search_missing_required_param()
     test_tui_boots()
+    test_tui_opens_dropdown_form()
+    test_tui_renders_geojson_map()
     print("all smoke tests passed")

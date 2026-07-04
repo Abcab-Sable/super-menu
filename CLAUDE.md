@@ -17,10 +17,20 @@ returning a `CommandResult`; the surfaces render from that metadata.
   runs `git` directly, other MCP clients have the official `mcp-server-git`, humans have the git
   CLI / lazygit / IDE integrations) and only bloats the MCP tool list. Its value is proving the
   contract generalizes beyond fetch-and-index, not shipping git features.
+- `src/super_menu/plugins/route_avoider/` — area-avoidance route planner (`id = "route-avoider"`);
+  the *reference example* for network-backed sources swappable behind an **adapter interface**
+  (`adapter.py` = `RoutingAdapter` + live `ORSAdapter` + offline `StubAdapter`; `geo.py` = pure
+  geometry/parsing; `plugin.py` = commands). Live routing needs `ORS_API_KEY`; with none set it
+  falls back to the labelled offline estimator so it installs/demos/tests with zero setup (the
+  free-for-dev seed pattern). Pure `geo.py` + the stub keep it fully unit-testable offline.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be
   JSON-serializable so it flows to CLI `--json`, MCP, and the TUI unchanged.
+- `CommandResult.kind` picks the rendering: `table` / `list` / `text` / `json`, or `geojson` —
+  where `data` is a GeoJSON object (usually a FeatureCollection) that the TUI and CLI rasterize to
+  a braille map via `core/braille.py` (MCP/`--json` get the raw GeoJSON). Any plugin emitting
+  spatial data becomes a map with no surface-specific code; route-avoider is the reference user.
 - `Plugin.id` is a stable lowercase token used in CLI and MCP tool names (`<id>__<command>`).
 - Runtime caches/indexes go under `core.config.plugin_data_dir(<id>)`, never in the repo
   (except an optional packaged seed in the plugin's `data/`).
