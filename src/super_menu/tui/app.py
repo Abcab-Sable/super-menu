@@ -58,12 +58,7 @@ class GeoMap(Widget):
     def render(self) -> Text:
         w = self.size.width or 48
         h = self.size.height or 16
-        lines = braille.render_geojson(self._geojson, w, h)
-        text = Text("\n".join(lines), no_wrap=True)
-        legend = braille.legend(self._geojson)
-        if legend:
-            text.append(f"\n{legend}", style="dim")
-        return text
+        return braille.render_geojson(self._geojson, w, h)
 
     def on_resize(self) -> None:
         self.refresh()
@@ -189,7 +184,7 @@ class SuperMenuApp(App):
     }
     #form {
         height: auto;
-        max-height: 60%;
+        max-height: 42%;
         margin-bottom: 1;
         padding: 0 2 1 2;
     }
@@ -260,7 +255,8 @@ class SuperMenuApp(App):
 
     GeoMap {
         width: 1fr;
-        height: 18;
+        height: 1fr;
+        min-height: 12;
         margin-top: 1;
         padding: 0 1;
         color: $accent;

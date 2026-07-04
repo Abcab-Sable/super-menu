@@ -90,12 +90,12 @@ def _print_table(rows: list[dict], cols: list[str], max_width: int = 60) -> None
 
 
 def _print_map(geojson: dict) -> None:
-    cols = min(max(shutil.get_terminal_size((80, 24)).columns - 2, 40), 100)
-    for line in braille.render_geojson(geojson, width=cols, height=20):
-        print(line)
-    legend = braille.legend(geojson)
-    if legend:
-        print(legend)
+    from rich.console import Console
+
+    size = shutil.get_terminal_size((80, 24))
+    cols = min(max(size.columns - 2, 40), 110)
+    rows = min(max(size.lines - 8, 16), 30)
+    Console().print(braille.render_geojson(geojson, width=cols, height=rows))
 
 
 def _list_plugins() -> int:

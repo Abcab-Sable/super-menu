@@ -74,7 +74,8 @@ def test_stub_route_basic():
     d = eng.geocode("Aberystwyth")
     res = eng.route(o, d, avoid_rings=[], avoid_motorways=False, profile="driving-car")
     assert res.distance_km > 0 and res.duration_min > 0
-    assert res.geometry["type"] == "LineString" and res.waypoints > 2
+    # no zones ⇒ a direct 2-point line; the renderer interpolates it into a stroke
+    assert res.geometry["type"] == "LineString" and res.waypoints >= 2
 
 
 def test_avoid_zone_lengthens_route():
@@ -90,6 +91,7 @@ def test_avoid_zone_lengthens_route():
     avoided = eng.route(o, d, avoid_rings=[ring], avoid_motorways=False,
                         profile="driving-car")
     assert avoided.distance_km > plain.distance_km
+    assert avoided.waypoints > 2, "a detour waypoint should be inserted (route bends)"
 
 
 def test_enclosed_destination_raises_no_route():

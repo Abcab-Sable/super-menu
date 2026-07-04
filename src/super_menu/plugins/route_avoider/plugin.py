@@ -102,7 +102,12 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
     # endpoints), so the TUI/CLI render it as a braille map and MCP/--json get a
     # payload that drops straight into geojson.io. Route metrics ride along as
     # GeoJSON foreign members (RFC 7946 §6.1), so callers still read them as fields.
-    fc = geo.feature_collection(result.geometry, specs, (o.lat, o.lng), (d.lat, d.lng))
+    # Name the endpoints in the map legend: use the typed place name, or a
+    # generic tag when the input was raw coordinates.
+    o_label = "start" if geo.parse_point(origin) else origin
+    d_label = "end" if geo.parse_point(destination) else destination
+    fc = geo.feature_collection(result.geometry, specs, (o.lat, o.lng), (d.lat, d.lng),
+                                origin_label=o_label, destination_label=d_label)
     fc.update({
         "bbox": result.bbox,
         "engine": engine.name,

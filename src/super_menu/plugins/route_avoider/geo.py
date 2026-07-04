@@ -219,26 +219,35 @@ def bbox_of(coords: list[list[float]]) -> Optional[list[float]]:
 
 
 def feature_collection(route_geometry: dict, specs: list[AvoidSpec],
-                       origin: tuple[float, float],
-                       destination: tuple[float, float]) -> dict:
-    """Bundle the route line, avoid circles, and endpoints into one GeoJSON
-    FeatureCollection — paste it into geojson.io to see the plan on a map."""
+                       origin: tuple[float, float], destination: tuple[float, float],
+                       origin_label: str = "start",
+                       destination_label: str = "end") -> dict:
+    """Bundle the route line, avoid circles, and labelled endpoints into one
+    GeoJSON FeatureCollection — the renderer draws it as a map, and it drops
+    straight into geojson.io. Each avoid circle gets a numbered centre marker and
+    the endpoints get ``A``/``B`` markers so the map has a legend."""
     features: list[dict] = [
         {"type": "Feature", "properties": {"kind": "route"}, "geometry": route_geometry},
     ]
-    for s in specs:
-        if not s.resolved:
-            continue
+    for i, s in enumerate((s for s in specs if s.resolved), start=1):
         features.append({
             "type": "Feature",
             "properties": {"kind": "avoid", "label": s.label, "radius_km": s.radius_km},
             "geometry": {"type": "Polygon",
                          "coordinates": [circle_ring(s.lat, s.lng, s.radius_km)]},  # type: ignore[arg-type]
         })
-    for name, (lat, lng) in (("origin", origin), ("destination", destination)):
+        features.append({  # numbered centre marker so the zone shows up in the legend
+            "type": "Feature",
+            "properties": {"kind": "avoid", "marker": str(i), "label": s.label or f"zone {i}"},
+            "geometry": {"type": "Point", "coordinates": [s.lng, s.lat]},
+        })
+    for kind, marker, label, (lat, lng) in (
+        ("origin", "A", origin_label, origin),
+        ("destination", "B", destination_label, destination),
+    ):
         features.append({
             "type": "Feature",
-            "properties": {"kind": name},
+            "properties": {"kind": kind, "marker": marker, "label": label},
             "geometry": {"type": "Point", "coordinates": [lng, lat]},
         })
     return {"type": "FeatureCollection", "features": features}

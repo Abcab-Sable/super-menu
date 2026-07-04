@@ -20,6 +20,7 @@ Two adapters ship here:
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -218,10 +219,8 @@ class StubAdapter(RoutingAdapter):
     name = "offline-estimate"
     live = False
 
-    def __init__(self, places: dict[str, tuple[float, float]] | None = None,
-                 samples: int = 48):
+    def __init__(self, places: dict[str, tuple[float, float]] | None = None):
         self.places = {k.lower(): v for k, v in (places or DEMO_PLACES).items()}
-        self.samples = samples
 
     def geocode(self, query: str) -> GeoPoint:
         hit = self.places.get(query.strip().lower())
@@ -243,13 +242,13 @@ class StubAdapter(RoutingAdapter):
                                "the destination sits inside an avoid zone — reduce a radius "
                                "or remove a zone")
 
-        base_km = geo.haversine_km(origin.lat, origin.lng,
-                                   destination.lat, destination.lng) * 1.30
-        polyline, crossings = self._trace(origin, destination, avoid_rings)
-        detour = base_km * 0.08 * crossings
+        # Weave a polyline that steers around each avoid circle instead of drawing
+        # a straight line through it, so the estimate — and the map — reflect the
+        # detour. Road distance ≈ path length × a winding factor.
+        polyline = self._avoiding_path(origin, destination, avoid_rings)
+        distance = round(_path_km(polyline) * 1.30, 2)
         if avoid_motorways:
-            detour += base_km * 0.12  # motorway-free routes wander
-        distance = round(base_km + detour, 2)
+            distance = round(distance * 1.12, 2)  # motorway-free routes wander more
         speed = _STUB_SPEED_KMH.get(profile, _STUB_SPEED_KMH["driving-car"])
         return RouteResult(
             distance_km=distance,
@@ -259,17 +258,60 @@ class StubAdapter(RoutingAdapter):
             bbox=geo.bbox_of(polyline),
         )
 
-    def _trace(self, origin: GeoPoint, destination: GeoPoint,
-               avoid_rings: list[geo.Ring]) -> tuple[list[list[float]], int]:
-        """Sample the direct line; return its polyline and how many samples land
-        inside an avoid zone (a proxy for how disruptive the zones are)."""
-        polyline: list[list[float]] = []
-        crossings = 0
-        for i in range(self.samples + 1):
-            t = i / self.samples
-            lat = origin.lat + (destination.lat - origin.lat) * t
-            lng = origin.lng + (destination.lng - origin.lng) * t
-            polyline.append([round(lng, 6), round(lat, 6)])
-            if geo.point_in_any(lng, lat, avoid_rings):
-                crossings += 1
-        return polyline, crossings
+    def _avoiding_path(self, origin: GeoPoint, destination: GeoPoint,
+                       avoid_rings: list[geo.Ring]) -> list[list[float]]:
+        """Insert detour waypoints until no segment cuts through an avoid circle."""
+        circles = [_ring_circle(r) for r in avoid_rings]
+        path: list[list[float]] = [[origin.lng, origin.lat],
+                                   [destination.lng, destination.lat]]
+        for _ in range(24):  # bounded: each pass detours the worst crossing per segment
+            changed = False
+            out = [path[0]]
+            for a, b in zip(path, path[1:]):
+                wp = _detour_waypoint(a, b, circles)
+                if wp is not None:
+                    out.append(wp)
+                    changed = True
+                out.append(b)
+            path = out
+            if not changed or len(path) > 64:
+                break
+        return [[round(x, 6), round(y, 6)] for x, y in path]
+
+
+def _ring_circle(ring: geo.Ring) -> tuple[float, float, float]:
+    """Approximate a ring as (centre_lng, centre_lat, radius_deg)."""
+    pts = ring[:-1] if len(ring) > 1 and ring[0] == ring[-1] else ring
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    rad = max(math.hypot(p[0] - cx, p[1] - cy) for p in pts)
+    return cx, cy, rad
+
+
+def _detour_waypoint(a: list[float], b: list[float],
+                     circles: list[tuple[float, float, float]]) -> list[float] | None:
+    """If segment a→b penetrates a circle, a waypoint just outside its worst
+    offender that bends the path around it; else ``None``."""
+    abx, aby = b[0] - a[0], b[1] - a[1]
+    len2 = abx * abx + aby * aby or 1e-12
+    worst = None
+    for cx, cy, rad in circles:
+        t = max(0.0, min(1.0, ((cx - a[0]) * abx + (cy - a[1]) * aby) / len2))
+        px, py = a[0] + abx * t, a[1] + aby * t
+        depth = math.hypot(px - cx, py - cy)
+        if depth < rad * 0.98 and (worst is None or depth < worst[0]):
+            worst = (depth, cx, cy, rad, px, py)
+    if worst is None:
+        return None
+    _, cx, cy, rad, px, py = worst
+    dx, dy = px - cx, py - cy
+    dl = math.hypot(dx, dy)
+    if dl < 1e-9:  # segment runs through the centre: offset perpendicular to it
+        dx, dy = -aby, abx
+        dl = math.hypot(dx, dy) or 1e-9
+    return [cx + dx / dl * rad * 1.6, cy + dy / dl * rad * 1.6]
+
+
+def _path_km(path: list[list[float]]) -> float:
+    return sum(geo.haversine_km(a[1], a[0], b[1], b[0])
+               for a, b in zip(path, path[1:]))
