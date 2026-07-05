@@ -203,6 +203,63 @@
   .leaflet-control-attribution a { color: var(--cyan) !important; }
   .glow path { filter: drop-shadow(0 0 6px rgba(56,225,255,.9)); }
 
+  /* ---- tactical map (route-avoider › route) ---- */
+  .tac { display: grid; grid-template-columns: 292px 1fr; gap: 14px; height: 100%;
+    min-height: 360px; }
+  .tac-ctl { overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 12px; }
+  .tac-ctl::-webkit-scrollbar { width: 6px; }
+  .tac-ctl::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .tac-map { border: 1px solid var(--cyan-dim); min-height: 320px; position: relative; }
+  .tac-map::before, .tac-map::after { content: ''; position: absolute; width: 22px; height: 22px;
+    z-index: 500; pointer-events: none; }
+  .tac-map::before { top: -1px; left: -1px; border-top: 2px solid var(--cyan);
+    border-left: 2px solid var(--cyan); }
+  .tac-map::after { bottom: -1px; right: -1px; border-bottom: 2px solid var(--cyan);
+    border-right: 2px solid var(--cyan); }
+  .tac .sect { margin: 2px 0 0; }
+  .tac .stop { display: flex; align-items: center; gap: 8px; }
+  .tac .stop .dot { width: 10px; height: 10px; flex: none; border: 2px solid;
+    clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+  .tac .stop.a .dot { border-color: var(--ok); background: rgba(61,255,162,.3); }
+  .tac .stop.b .dot { border-color: var(--err); background: rgba(255,84,112,.3); }
+  .tac .stop input { flex: 1; min-width: 0; padding: 8px 10px; font-family: var(--mono);
+    font-size: 11.5px; color: var(--fg); background: rgba(3,10,18,.8);
+    border: 1px solid var(--cyan-dim); }
+  .tac .stop input:focus { outline: none; border-color: var(--cyan); }
+  .tac .seg3 { display: flex; gap: 4px; }
+  .tac .seg3 button { flex: 1; font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+    padding: 7px 2px; cursor: pointer; color: var(--muted); background: rgba(56,225,255,.04);
+    border: 1px solid var(--cyan-dim); text-transform: uppercase; transition: .15s;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .tac .seg3 button.active { color: #04202b; background: var(--cyan); border-color: var(--cyan);
+    box-shadow: 0 0 12px rgba(56,225,255,.45); }
+  .tac .seg3 button.zone.active { background: var(--amber); border-color: var(--amber);
+    box-shadow: 0 0 12px rgba(255,180,84,.45); }
+  .tac .slider { display: flex; align-items: center; gap: 8px; font-family: var(--mono);
+    font-size: 10px; color: var(--muted); }
+  .tac .slider input { flex: 1; accent-color: var(--amber); }
+  .tac .slider b { color: var(--amber); width: 46px; text-align: right; font-weight: 700; }
+  #tac-zones { display: flex; flex-wrap: wrap; gap: 5px; }
+  #tac-zones:empty { display: none; }
+  .zchip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono);
+    font-size: 9.5px; font-weight: 600; color: var(--amber); padding: 3px 4px 3px 8px;
+    background: rgba(255,180,84,.08); border: 1px solid rgba(255,180,84,.35); cursor: default;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .zchip button { all: unset; cursor: pointer; padding: 0 3px; }
+  .zchip button:hover { color: #fff; }
+  #tac-run { width: 100%; font-family: var(--disp); font-size: 14px; font-weight: 700;
+    letter-spacing: .2em; padding: 11px 0; cursor: pointer; color: #032430; border: none;
+    background: linear-gradient(135deg, var(--cyan), #7cf5ff);
+    box-shadow: 0 0 22px rgba(56,225,255,.4); text-transform: uppercase; transition: .15s;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+  #tac-run:hover { filter: brightness(1.12); }
+  #tac-run:disabled { opacity: .55; cursor: wait; }
+  #tac-metrics { display: flex; flex-wrap: wrap; gap: 5px; }
+  #tac-metrics:empty { display: none; }
+  .flow path { stroke-dasharray: 1 12; stroke-linecap: round; animation: flowdash 1.3s linear infinite; }
+  @keyframes flowdash { to { stroke-dashoffset: -13; } }
+  @media (max-width: 900px) { .tac { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
+
   /* ---- footer ---- */
   #foot { grid-area: foot; display: flex; align-items: center; gap: 16px; padding: 0 8px;
     font-family: var(--mono); font-size: 9.5px; color: var(--muted); letter-spacing: .14em; }
@@ -338,10 +395,14 @@ const bootLines = [
     log.innerHTML += '<span style="color:var(--err)">REGISTRY OFFLINE</span>';
   }
   await new Promise(r => setTimeout(r, 550));
-  $('boot').classList.add('done');
+  bootOff();
   if (state.menu) initUI();
 })();
-$('boot').onclick = () => $('boot').classList.add('done');
+function bootOff() {
+  $('boot')?.classList.add('done');
+  setTimeout(() => $('boot')?.remove(), 600);  // stop the hidden ring animations for good
+}
+$('boot').onclick = bootOff;
 
 /* ======== clock ======== */
 setInterval(() => {
@@ -373,8 +434,7 @@ function selectPlugin(id, cmdName) {
   document.querySelectorAll('.mod').forEach(m => m.classList.toggle('active', m.dataset.id === id));
   if (!state.plugin) return;
   $('p-name').innerHTML = `${esc(state.plugin.name).toUpperCase()}<span> // MODULE</span>`;
-  $('p-desc').innerHTML = esc(state.plugin.description) +
-    (id === 'route-avoider' ? ' &nbsp;<a class="maplink" href="/route" target="_blank">OPEN TACTICAL MAP ↗</a>' : '');
+  $('p-desc').textContent = state.plugin.description;
   const cmds = $('cmds');
   cmds.innerHTML = '';
   for (const c of state.plugin.commands) {
@@ -396,9 +456,20 @@ function selectCommand(name) {
 }
 
 /* ======== auto-form from Param metadata ======== */
+const isTactical = () => state.plugin?.id === 'route-avoider' && state.command?.name === 'route';
+
 function buildForm() {
   const form = $('form');
   form.innerHTML = '';
+  if (tac.map) { tac.map.remove(); tac.map = null; }   // leaving/re-entering tactical
+  if (isTactical()) {                                   // the route command IS a map
+    $('runrow').style.display = 'none';
+    $('out-head').style.display = 'none';
+    renderTactical();
+    return;
+  }
+  $('out-body').innerHTML = '<div class="placeholder">AWAITING DIRECTIVE<br/>SET PARAMETERS // EXECUTE</div>';
+  $('out-head').style.display = 'none';
   if (!state.command) { $('runrow').style.display = 'none'; return; }
   for (const p of state.command.params) {
     const f = document.createElement('div');
@@ -544,6 +615,235 @@ async function renderGeo(body, geojson) {
   }).addTo(map);
   const b = layer.getBounds();
   if (b.isValid()) map.fitBounds(b.pad(0.18)); else map.setView([53.4, -2.2], 5);
+}
+
+/* ======== tactical map — an embedded custom view for route-avoider › route.
+   Same execution path as everything else (/api/run); only the input surface
+   is a map instead of a form. State survives switching commands. ======== */
+const tac = { map: null, origin: null, dest: null, zones: [], mode: 'origin',
+              layers: [], originPin: null, destPin: null, seq: 0 };
+
+const tacPin = color => `
+  <svg style="filter:drop-shadow(0 0 6px ${color})" width="26" height="34" viewBox="0 0 30 40">
+    <path d="M15 0C6.7 0 0 6.7 0 15c0 10.4 15 25 15 25S30 25.4 30 15C30 6.7 23.3 0 15 0z" fill="${color}"/>
+    <circle cx="15" cy="14.5" r="6" fill="#04101c"/>
+  </svg>`;
+
+function renderTactical() {
+  const presets = state.command.params.find(p => p.name === 'preset')?.choices || [];
+  const profiles = state.command.params.find(p => p.name === 'profile')?.choices || ['driving-car'];
+  $('out-body').innerHTML = `
+  <div class="tac">
+    <div class="tac-ctl">
+      <div class="sect">// WAYPOINTS</div>
+      <div class="stop a"><span class="dot"></span>
+        <input id="tac-a" placeholder="start — search or click map" autocomplete="off"
+               value="${tac.origin ? esc(tac.origin.label) : ''}" /></div>
+      <div class="stop b"><span class="dot"></span>
+        <input id="tac-b" placeholder="destination" autocomplete="off"
+               value="${tac.dest ? esc(tac.dest.label) : ''}" /></div>
+      <div class="sect">// MAP CLICK DROPS</div>
+      <div class="seg3" id="tac-seg">
+        <button data-m="origin">start</button>
+        <button data-m="destination">end</button>
+        <button data-m="avoid" class="zone">⛔ zone</button>
+      </div>
+      <div class="slider">RADIUS <input id="tac-r" type="range" min="1" max="60"
+        value="${tac.radius || 12}" /><b id="tac-rv">${tac.radius || 12} km</b></div>
+      <div id="tac-zones"></div>
+      <div class="sect">// PARAMETERS</div>
+      <div class="field"><select id="tac-preset" data-nofield>
+        <option value="">preset — none</option>
+        ${presets.map(p => `<option>${esc(p)}</option>`).join('')}</select></div>
+      <div class="field"><select id="tac-profile" data-nofield>
+        ${profiles.map(p => `<option>${esc(p)}</option>`).join('')}</select></div>
+      <div class="field bool" style="padding-top:2px">
+        <label class="tgl"><input id="tac-motor" type="checkbox" /><i></i></label>
+        <label>AVOID MOTORWAYS</label></div>
+      <button id="tac-run">Plot Course</button>
+      <div id="tac-metrics"></div>
+      <div id="tac-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></div>
+    </div>
+    <div class="tac-map" id="tac-map"></div>
+  </div>`;
+
+  document.querySelectorAll('#tac-seg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.m === tac.mode);
+    b.onclick = () => { tac.mode = b.dataset.m;
+      document.querySelectorAll('#tac-seg button').forEach(x =>
+        x.classList.toggle('active', x === b)); };
+  });
+  $('tac-r').oninput = e => { tac.radius = +e.target.value;
+    $('tac-rv').textContent = e.target.value + ' km'; };
+  $('tac-a').addEventListener('keydown', e => { if (e.key === 'Enter') tacGeocode('origin'); });
+  $('tac-b').addEventListener('keydown', e => { if (e.key === 'Enter') tacGeocode('destination'); });
+  $('tac-run').onclick = tacRoute;
+
+  ensureLeaflet().then(L => {
+    tac.map = L.map('tac-map', { zoomControl: true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20, subdomains: 'abcd',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+    }).addTo(tac.map);
+    tac.map.setView(tac.center || [53.4, -2.2], tac.zoom || 6);
+    tac.map.on('moveend', () => { tac.center = tac.map.getCenter(); tac.zoom = tac.map.getZoom(); });
+    tac.map.on('click', e => {
+      if (tac.mode === 'avoid') tacAddZone(e.latlng.lat, e.latlng.lng, tac.radius || 12);
+      else if (tac.mode === 'origin') {
+        tacSetPoint('origin', e.latlng.lat, e.latlng.lng,
+          `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`);
+        if (!tac.dest) tacSetMode('destination');
+      } else tacSetPoint('destination', e.latlng.lat, e.latlng.lng,
+        `${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`);
+    });
+    // restore surviving state onto the fresh map instance
+    if (tac.origin) tacDrawPin('origin');
+    if (tac.dest) tacDrawPin('destination');
+    const zs = tac.zones.splice(0);
+    zs.forEach(z => tacAddZone(z.lat, z.lng, z.radius_km));
+    if (tac.lastGeojson) tacDrawRoute(tac.lastGeojson, false);
+    tacMetrics(tac.lastGeojson);
+  });
+}
+
+function tacSetMode(m) {
+  tac.mode = m;
+  document.querySelectorAll('#tac-seg button').forEach(x =>
+    x.classList.toggle('active', x.dataset.m === m));
+}
+
+function tacDrawPin(which) {
+  const L = window.L;
+  const isA = which === 'origin';
+  const pt = isA ? tac.origin : tac.dest;
+  const old = isA ? tac.originPin : tac.destPin;
+  if (old) tac.map.removeLayer(old);
+  const pin = L.marker([pt.lat, pt.lng], { icon: L.divIcon({ className: '',
+    html: tacPin(isA ? '#3dffa2' : '#ff5470'), iconSize: [26, 34], iconAnchor: [13, 33] }) })
+    .addTo(tac.map);
+  if (isA) tac.originPin = pin; else tac.destPin = pin;
+}
+
+function tacSetPoint(which, lat, lng, label) {
+  const pt = { lat, lng, label };
+  if (which === 'origin') { tac.origin = pt; $('tac-a').value = label; }
+  else { tac.dest = pt; $('tac-b').value = label; }
+  tacDrawPin(which);
+}
+
+function tacAddZone(lat, lng, radius_km) {
+  const L = window.L;
+  const circle = L.circle([lat, lng], { radius: radius_km * 1000, color: '#ffb454',
+    weight: 2, dashArray: '6 6', fillColor: '#ffb454', fillOpacity: .13 }).addTo(tac.map);
+  const z = { id: ++tac.seq, lat, lng, radius_km, circle };
+  circle.on('click', ev => { L.DomEvent.stop(ev); tacRemoveZone(z.id); });
+  tac.zones.push(z);
+  tacZoneChips();
+}
+function tacRemoveZone(id) {
+  const i = tac.zones.findIndex(z => z.id === id);
+  if (i < 0) return;
+  tac.map.removeLayer(tac.zones[i].circle);
+  tac.zones.splice(i, 1);
+  tacZoneChips();
+}
+function tacZoneChips() {
+  const box = $('tac-zones');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const z of tac.zones) {
+    const c = document.createElement('span');
+    c.className = 'zchip';
+    c.innerHTML = `⛔ ${z.radius_km}km <button title="remove">✕</button>`;
+    c.querySelector('button').onclick = () => tacRemoveZone(z.id);
+    box.appendChild(c);
+  }
+}
+
+async function tacGeocode(which) {
+  const input = which === 'origin' ? $('tac-a') : $('tac-b');
+  const q = input.value.trim();
+  if (!q) return;
+  input.style.opacity = .5;
+  try {
+    const d = await fetch('/api/geocode?q=' + encodeURIComponent(q)).then(r => r.json());
+    if (!d.ok) { tacStatus(d.error || `no match for “${q}”`, true); return; }
+    tacSetPoint(which, d.lat, d.lng, (d.label || q).split(',').slice(0, 2).join(','));
+    tac.map.flyTo([d.lat, d.lng], Math.max(tac.map.getZoom(), 9), { duration: .7 });
+    tacStatus('');
+  } catch (e) { tacStatus('geocode link failure', true); }
+  finally { input.style.opacity = 1; }
+}
+
+async function tacRoute() {
+  if (!tac.origin || !tac.dest) { tacStatus('set a start and a destination first', true); return; }
+  const btn = $('tac-run');
+  btn.disabled = true; btn.textContent = 'PLOTTING…';
+  const params = {
+    origin: `${tac.origin.lat},${tac.origin.lng}`,
+    destination: `${tac.dest.lat},${tac.dest.lng}`,
+    avoid_motorways: $('tac-motor').checked,
+    profile: $('tac-profile').value,
+  };
+  const avoid = tac.zones.map(z => `${z.lat},${z.lng},${z.radius_km}`).join(';');
+  if (avoid) params.avoid = avoid;
+  if ($('tac-preset').value) params.preset = $('tac-preset').value;
+  let res;
+  try {
+    res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin: 'route-avoider', command: 'route', params }) })
+      .then(r => r.json());
+  } catch (e) { res = { ok: false, summary: 'link failure' }; }
+  btn.disabled = false; btn.textContent = 'PLOT COURSE';
+  if (!res.ok) { tacStatus(res.summary || 'no route', true); return; }
+  tac.lastGeojson = res.data;
+  tacDrawRoute(res.data, true);
+  tacMetrics(res.data);
+  tacStatus('◉ ' + res.summary);
+}
+
+function tacDrawRoute(geojson, fly) {
+  const L = window.L;
+  tac.layers.forEach(l => tac.map.removeLayer(l));
+  tac.layers = [];
+  const line = { filter: f => f.geometry.type === 'LineString' };
+  // glow = a wide low-opacity stroke, NOT a CSS drop-shadow filter: filters get
+  // re-rastered every frame of the dash animation and freeze the renderer on
+  // long (5k+ point) routes.
+  tac.layers.push(L.geoJSON(geojson, { ...line, style: { color: '#04101c', weight: 10, opacity: .85 } }).addTo(tac.map));
+  tac.layers.push(L.geoJSON(geojson, { ...line, style: { color: '#38e1ff', weight: 8, opacity: .28 } }).addTo(tac.map));
+  tac.layers.push(L.geoJSON(geojson, { ...line, style: { color: '#38e1ff', weight: 3.5, opacity: .95 } }).addTo(tac.map));
+  // the animated dashes are decorative — run them on a decimated copy so a
+  // 5k-point route doesn't get re-stroked at full resolution every frame
+  const routeFeat = (geojson.features || []).find(f => f.geometry.type === 'LineString');
+  if (routeFeat) {
+    const pts = routeFeat.geometry.coordinates;
+    const step = Math.max(1, Math.ceil(pts.length / 600));
+    const slim = pts.filter((_, i) => i % step === 0 || i === pts.length - 1);
+    tac.layers.push(L.geoJSON({ type: 'Feature', geometry: { type: 'LineString', coordinates: slim } },
+      { style: { color: '#d9fbff', weight: 3.5, opacity: .9, className: 'flow' } }).addTo(tac.map));
+  }
+  const b = tac.layers[2].getBounds();
+  if (fly && b.isValid()) tac.map.flyToBounds(b.pad(0.15), { duration: .8 });
+}
+
+function tacMetrics(geojson) {
+  const box = $('tac-metrics');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!geojson) return;
+  const picks = [['distance_km', 'DIST', ' km'], ['duration_min', 'ETA', ' min'],
+                 ['avoid_zones_applied', 'ZONES', ''], ['engine', 'ENGINE', '']];
+  box.innerHTML = picks.filter(([k]) => geojson[k] !== undefined)
+    .map(([k, lbl, unit]) => `<span class="metric">${lbl} <b>${esc(String(geojson[k]))}${unit}</b></span>`)
+    .join('') + (geojson.live === false ? '<span class="metric" style="color:var(--amber)">ESTIMATE</span>' : '');
+}
+
+function tacStatus(msg, isErr) {
+  const el = $('tac-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--err)' : 'var(--ok)';
 }
 
 /* ======== JSON highlighter ======== */
