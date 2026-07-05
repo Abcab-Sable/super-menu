@@ -115,7 +115,9 @@ class GeoMap(Widget):
                         exclusive=True, group="roads")
 
     def _load_roads(self, frame: tuple[float, float, float, float]) -> None:
-        lines = roads.roads_for_view(frame)  # never raises; [] on any failure
+        # never raises; [] on any failure. allow_slow: a worker can afford the
+        # ~minute a country-scale first fetch takes — it caches for everyone.
+        lines = roads.roads_for_view(frame, allow_slow=True)
         if lines:
             self._roads = lines
             self.app.call_from_thread(self.refresh)

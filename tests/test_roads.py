@@ -109,6 +109,24 @@ def test_empty_fetch_is_not_persisted():
         assert cache_files == [], "an empty reply must never poison the disk cache"
 
 
+def test_country_scale_needs_allow_slow():
+    wide = (-5.0, 51.0, 0.0, 55.0)             # ~a-minute fetch on public Overpass
+    calls = []
+
+    def fake_fetch(bbox, classes):
+        calls.append(1)
+        return [["motorway", [[-2.0, 53.0], [-2.1, 53.1]]]]
+
+    with _fresh():
+        assert roads.roads_for_view(wide, fetch=fake_fetch) == []
+        assert calls == [], "sync callers must not start a slow fetch"
+        assert roads.roads_for_view(wide, fetch=fake_fetch, allow_slow=True)
+        assert len(calls) == 1
+        roads._memo.clear()
+        assert roads.roads_for_view(wide, fetch=fake_fetch)  # cached ⇒ sync gets it
+        assert len(calls) == 1
+
+
 def test_offline_switch_blocks_fetching():
     with _fresh():
         os.environ["SUPER_MENU_OFFLINE"] = "1"
@@ -139,6 +157,7 @@ if __name__ == "__main__":
     test_roads_for_view_caches_fetches()
     test_roads_for_view_failure_is_soft_and_backed_off()
     test_empty_fetch_is_not_persisted()
+    test_country_scale_needs_allow_slow()
     test_offline_switch_blocks_fetching()
     test_braille_draws_road_underlay()
     print("all roads tests passed")

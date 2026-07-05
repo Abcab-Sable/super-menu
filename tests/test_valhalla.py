@@ -98,6 +98,13 @@ def test_translate_http_error():
         _http_error(400, {"error_code": 171, "error": "Insufficient locations"}))
     assert isinstance(other, RoutingError) and not isinstance(other, NoRouteError)
     assert "Insufficient" in str(other)
+    # Stock configs cap exclude_polygons circumference at 10 km; the message must
+    # point at the server-side fix, not just echo the limit.
+    capped = ValhallaAdapter._translate_http_error(_http_error(400, {
+        "error_code": 167,
+        "error": "Exceeded maximum circumference for exclude_polygons: 10000 meters"}))
+    assert isinstance(capped, RoutingError) and not isinstance(capped, NoRouteError)
+    assert "max_exclude_polygons_length" in str(capped)
 
 
 def test_geocode_is_unsupported():

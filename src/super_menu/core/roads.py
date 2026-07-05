@@ -53,6 +53,8 @@ _TIERS: list[tuple[float, tuple[str, ...]]] = [
 _STEPS = [(0.25, 0.05), (1.0, 0.25), (4.0, 1.0), (math.inf, 5.0)]
 
 _PAD = 0.30          # fetch this much extra around the view (fraction per side)
+_SLOW_SPAN = 2.5     # above this span an uncached fetch takes ~a minute (60 MB+);
+                     # only background callers (allow_slow=True) attempt it
 _DECIMATE = 600.0    # keep points no closer than span / this (~half a braille dot)
 _ROUND = 5           # cache-file coordinate precision (1e-5° ≈ 1 m)
 _MAX_WAYS = 60000    # Overpass reply cap — a braille canvas can't show more anyway
@@ -94,12 +96,17 @@ def fetch_bbox(view: tuple[float, float, float, float]
 
 
 def roads_for_view(view: tuple[float, float, float, float], *,
-                   fetch: Optional[FetchFn] = None) -> list:
+                   fetch: Optional[FetchFn] = None, allow_slow: bool = False) -> list:
     """Road polylines covering ``view`` as ``[class, [[lng, lat], ...]]`` pairs.
 
     Never raises: no network, an Overpass error, or a too-wide view all yield
     ``[]`` (and failures are negative-cached for ``_FAIL_TTL`` seconds so an
-    interactive surface doesn't hammer a down endpoint on every pan)."""
+    interactive surface doesn't hammer a down endpoint on every pan).
+
+    Country-scale fetches (span > ``_SLOW_SPAN``) can take ~a minute on the
+    public Overpass API, so an uncached one only runs when ``allow_slow`` is
+    set — the TUI's background worker does; the synchronous CLI doesn't, and
+    simply renders roadless until some slow caller has filled the cache."""
     if disabled():
         return []
     span = max(view[2] - view[0], view[3] - view[1])
@@ -121,6 +128,8 @@ def roads_for_view(view: tuple[float, float, float, float], *,
         pass
     if time.monotonic() - _failures.get(key, -_FAIL_TTL) < _FAIL_TTL:
         return []
+    if span > _SLOW_SPAN and not allow_slow:
+        return []                              # not a failure — a slow caller may fill it
 
     try:
         lines = (fetch or _fetch_overpass)(bbox, classes)
@@ -173,7 +182,7 @@ def _fetch_overpass(bbox: tuple[float, float, float, float],
                     classes: tuple[str, ...]) -> list:
     minlng, minlat, maxlng, maxlat = bbox
     query = (
-        f"[out:json][timeout:30];"
+        f"[out:json][timeout:90];"
         f'way["highway"~"^({"|".join(classes)})$"]'
         f"({minlat},{minlng},{maxlat},{maxlng});"
         f"out geom {_MAX_WAYS};"
@@ -186,7 +195,7 @@ def _fetch_overpass(bbox: tuple[float, float, float, float],
         headers={"User-Agent": "super-menu/0.1",
                  "Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req, timeout=40) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
         payload = json.loads(resp.read().decode("utf-8"))
     # Overpass reports server-side timeouts/truncation as a 200 with a "remark";
     # surface it as a failure so a partial reply is never cached as the truth.

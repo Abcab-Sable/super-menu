@@ -44,11 +44,31 @@ rm -rf ./tiles                        # drop the old region's tiles
 docker compose up -d
 ```
 
+## Raise the avoid-zone size limit (do this once)
+Valhalla's default config caps `exclude_polygons` at a **10 km circumference** —
+that's only a ~1.6 km-radius circle, so real avoid zones get rejected with
+"Exceeded maximum circumference for exclude_polygons". After the first build,
+raise the limit in the generated config and restart:
+```bash
+# in ./tiles/valhalla.json set:  "service_limits": { "max_exclude_polygons_length": 1000000, ... }
+docker compose up -d --force-recreate
+```
+1,000,000 m allows ~160 km-radius zones; the plugin's own 40-zone cap bounds abuse.
+The container keeps an existing `valhalla.json` (it only fills in missing keys), so
+the edit survives restarts.
+
 ## Resource guide
 | Coverage | Disk | RAM to build/run | Where |
 |---|---|---|---|
-| A country (e.g. Great Britain) | a few GB | ~4–8 GB | a laptop is fine |
+| A country (e.g. Great Britain) | a few GB | ~8–10 GB to build, less to run | a laptop is fine |
 | A continent (e.g. Europe) | tens of GB | 16 GB+ | a small VPS (~$40–80/mo) |
+
+**Windows/WSL2 gotcha:** Docker Desktop's VM defaults to 50% of host RAM. If the
+build exceeds that, the VM dies mid-build and — because tiles are only written at
+the end — the restarted container starts over, forever. On a 16 GB machine create
+`%USERPROFILE%\.wslconfig` with `[wsl2]` / `memory=11GB`, run `wsl --shutdown`, and
+restart Docker before building. A GB build takes ~35 min on 4 threads once it has
+the memory.
 
 Cost is only compute: the engine, the OSM data, and the tiles are all free. Run it
 locally and it's $0. Stop it any time with `docker compose down`.
