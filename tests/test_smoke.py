@@ -1,5 +1,8 @@
 """End-to-end smoke tests: discovery, parsing, CLI dispatch, and TUI boot."""
 import asyncio
+import os
+
+os.environ.setdefault("SUPER_MENU_OFFLINE", "1")  # GeoMap must not fetch roads in tests
 
 from super_menu.core.registry import Registry, default_registry
 from super_menu.plugins.free_for_dev import fetch

@@ -11,6 +11,9 @@ What makes the output readable rather than dots-in-a-void:
 
 * a bundled world **coastline basemap** is drawn faintly under the data, clipped
   to the view, so you can see *where* the geometry is;
+* callers may pass real **OSM road polylines** (``roads=``, fetched zoom-aware
+  by ``core/roads.py``) drawn as a second underlay — major roads warm, minor
+  roads grey — which is what turns the map from a sketch into MapSCII;
 * layers are **coloured** by feature ``kind`` (coast dim, routes bright, avoid
   zones amber, endpoints green/red) so they are distinguishable;
 * ``Point`` features become **labelled markers** with a legend;
@@ -42,6 +45,16 @@ _STYLE = {
 }
 _PRIORITY = {"coast": 0, "avoid": 1, "route": 3}  # which layer wins a shared cell
 _DEFAULT_PRIORITY = 2
+
+# Road underlay styling by OSM highway class (drawn at coast priority, after the
+# coastline, so roads win shared basemap cells but never cover plugin data).
+_ROAD_STYLE = {
+    "motorway": "orange3",
+    "trunk": "dark_orange3",
+    "primary": "grey66",
+    "secondary": "grey50",
+}
+_ROAD_DEFAULT_STYLE = "grey35"
 _SCALE_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000]
 _KM_PER_DEG = 111.32
 
@@ -199,14 +212,16 @@ def data_bbox(geojson: dict) -> Optional[tuple[float, float, float, float]]:
 
 def render_geojson(geojson: dict, width: int, height: int, *, basemap: bool = True,
                    view: Optional[tuple[float, float, float, float]] = None,
-                   waypoints: bool = False) -> Text:
+                   waypoints: bool = False, roads: Optional[list] = None) -> Text:
     """Render ``geojson`` as a coloured braille map of exactly ``height`` lines.
 
     ``view`` frames a specific ``(min_lng, min_lat, max_lng, max_lat)`` window
     (for zoom/pan); anything outside it is clipped. ``waypoints`` overlays a
-    marker on every line vertex. The bottom rows are a scale bar and a marker
-    legend when there is room; the map fills the rest. Degenerate inputs (no
-    coordinates, a single point, a zero-width span) render without error."""
+    marker on every line vertex. ``roads`` is an optional underlay of
+    ``[highway_class, [[lng, lat], ...]]`` pairs (see ``core/roads.py``) drawn
+    between the coastline and the data. The bottom rows are a scale bar and a
+    marker legend when there is room; the map fills the rest. Degenerate inputs
+    (no coordinates, a single point, a zero-width span) render without error."""
     width = max(8, int(width))
     height = max(3, int(height))
     legend_lines = _pack(_legend_entries(geojson), width, max_lines=2)
@@ -235,6 +250,8 @@ def render_geojson(geojson: dict, width: int, height: int, *, basemap: bool = Tr
 
     if basemap:
         _draw_basemap(canvas, project, frame)
+    if roads:
+        _draw_roads(canvas, project, frame, roads)
 
     markers: list[tuple[float, float, str, str]] = []
     wp_markers: list[tuple[float, float]] = []
@@ -262,6 +279,8 @@ def render_geojson(geojson: dict, width: int, height: int, *, basemap: bool = Tr
     text = canvas.to_text()
     if reserve:
         text.append(_scale_bar(scale, cos_lat, width))
+        if roads:
+            text.append(Text("  roads © OSM", style="dim"))
         for line in legend_lines:
             text.append("\n")
             text.append(Text(line, style="dim"))
@@ -277,6 +296,21 @@ def _draw_basemap(canvas: _Canvas, project, frame) -> None:
         ys = [p[1] for p in line]
         if max(xs) < fminlng or min(xs) > fmaxlng or max(ys) < fminlat or min(ys) > fmaxlat:
             continue
+        proj = [project(p[0], p[1]) for p in line]
+        for (x0, y0), (x1, y1) in zip(proj, proj[1:]):
+            canvas.stroke(x0, y0, x1, y1, prio, style)
+
+
+def _draw_roads(canvas: _Canvas, project, frame, roads: list) -> None:
+    fminlng, fminlat, fmaxlng, fmaxlat = frame
+    prio = _PRIORITY["coast"]
+    for cls, line in roads:
+        # cheap reject, same as the coastline: skip lines fully outside the view
+        xs = [p[0] for p in line]
+        ys = [p[1] for p in line]
+        if max(xs) < fminlng or min(xs) > fmaxlng or max(ys) < fminlat or min(ys) > fmaxlat:
+            continue
+        style = _ROAD_STYLE.get(cls, _ROAD_DEFAULT_STYLE)
         proj = [project(p[0], p[1]) for p in line]
         for (x0, y0), (x1, y1) in zip(proj, proj[1:]):
             canvas.stroke(x0, y0, x1, y1, prio, style)

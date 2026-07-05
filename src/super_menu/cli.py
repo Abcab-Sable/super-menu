@@ -94,10 +94,15 @@ def _print_table(rows: list[dict], cols: list[str], max_width: int = 60) -> None
 def _print_map(geojson: dict) -> None:
     from rich.console import Console
 
+    from super_menu.core import roads
+
     size = shutil.get_terminal_size((80, 24))
     cols = min(max(size.columns - 2, 40), 110)
     rows = min(max(size.lines - 8, 16), 30)
-    Console().print(braille.render_geojson(geojson, width=cols, height=rows))
+    view = braille.data_bbox(geojson)
+    road_lines = roads.roads_for_view(view) if view else []  # [] offline — map still renders
+    Console().print(braille.render_geojson(geojson, width=cols, height=rows,
+                                           roads=road_lines))
 
 
 def _list_plugins() -> int:

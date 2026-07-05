@@ -33,6 +33,10 @@ returning a `CommandResult`; the surfaces render from that metadata.
   where `data` is a GeoJSON object (usually a FeatureCollection) that the TUI and CLI rasterize to
   a braille map via `core/braille.py` (MCP/`--json` get the raw GeoJSON). Any plugin emitting
   spatial data becomes a map with no surface-specific code; route-avoider is the reference user.
+  The map draws a real **OSM road underlay** (zoom-aware highway classes via the Overpass API)
+  through `core/roads.py`: braille stays a pure rasterizer taking `roads=`; surfaces fetch (TUI
+  in a worker, CLI synchronously) with a disk cache under `data_home()/basemap/`. Offline-safe:
+  any failure renders roadless; tests set `SUPER_MENU_OFFLINE=1` (see `tests/conftest.py`).
 - `Plugin.id` is a stable lowercase token used in CLI and MCP tool names (`<id>__<command>`).
 - Runtime caches/indexes go under `core.config.plugin_data_dir(<id>)`, never in the repo
   (except an optional packaged seed in the plugin's `data/`).

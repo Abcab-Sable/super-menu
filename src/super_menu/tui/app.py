@@ -39,7 +39,7 @@ from textual.widgets import (
 )
 from textual.widgets.tree import TreeNode
 
-from super_menu.core import braille
+from super_menu.core import braille, roads
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult, Param, Plugin
 
@@ -72,7 +72,11 @@ class GeoMap(Widget):
         self._geojson = geojson
         self._bbox = braille.data_bbox(geojson)
         self._cx, self._cy = self._center()
+        self._roads: list = []
         self.border_title = "🗺  map"
+
+    def on_mount(self) -> None:
+        self._request_roads()
 
     def _center(self) -> tuple[float, float]:
         if not self._bbox:
@@ -96,9 +100,28 @@ class GeoMap(Widget):
         wp = " · waypoints" if self.show_waypoints else ""
         self.border_subtitle = f"{self.zoom:.1f}×  +/− · ↑↓←→ · w · 0{wp}"
         return braille.render_geojson(self._geojson, w, h, view=self._view(),
-                                      waypoints=self.show_waypoints)
+                                      waypoints=self.show_waypoints,
+                                      roads=self._roads)
+
+    def _request_roads(self) -> None:
+        """Fetch the OSM road underlay for the current view off the UI thread.
+
+        ``exclusive`` per group: a rapid zoom/pan burst keeps only the newest
+        fetch. Cache hits inside ``roads_for_view`` make repeats instant."""
+        frame = self._view() or self._bbox
+        if frame is None:
+            return
+        self.run_worker(partial(self._load_roads, frame), thread=True,
+                        exclusive=True, group="roads")
+
+    def _load_roads(self, frame: tuple[float, float, float, float]) -> None:
+        lines = roads.roads_for_view(frame)  # never raises; [] on any failure
+        if lines:
+            self._roads = lines
+            self.app.call_from_thread(self.refresh)
 
     def watch_zoom(self) -> None:
+        self._request_roads()
         self.refresh()
 
     def watch_show_waypoints(self) -> None:
@@ -118,6 +141,7 @@ class GeoMap(Widget):
         minlng, minlat, maxlng, maxlat = self._bbox
         self._cx += dx * (maxlng - minlng) / self.zoom * 0.2
         self._cy -= dy * (maxlat - minlat) / self.zoom * 0.2   # screen y grows downward
+        self._request_roads()
         self.refresh()
 
     def action_toggle_waypoints(self) -> None:
