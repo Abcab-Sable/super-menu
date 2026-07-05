@@ -183,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         run_mcp()
         return 0
     if head == "web":
-        from super_menu.plugins.route_avoider.webserver import run as run_web
+        from super_menu.web.server import run as run_web
         port = 8765
         for tok in argv[1:]:
             if tok.startswith("--port"):

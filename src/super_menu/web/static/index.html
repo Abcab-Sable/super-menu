@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SUPER·MENU — command deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #030711;
+    --cyan: #38e1ff;
+    --cyan-dim: rgba(56, 225, 255, .16);
+    --cyan-soft: rgba(56, 225, 255, .07);
+    --amber: #ffb454;
+    --ok: #3dffa2;
+    --err: #ff5470;
+    --fg: #d7f4ff;
+    --muted: #5f7d95;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --disp: 'Rajdhani', ui-sans-serif, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font-family: var(--disp); overflow: hidden; }
+
+  /* ======== atmosphere ======== */
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #stage::before {   /* grid */
+    content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+    background:
+      radial-gradient(ellipse 90% 70% at 50% -10%, rgba(56, 225, 255, .10), transparent 60%),
+      radial-gradient(ellipse 60% 50% at 85% 110%, rgba(124, 108, 255, .08), transparent 60%),
+      repeating-linear-gradient(0deg, transparent 0 39px, rgba(56, 225, 255, .045) 39px 40px),
+      repeating-linear-gradient(90deg, transparent 0 39px, rgba(56, 225, 255, .045) 39px 40px);
+  }
+  #stage::after {    /* scanlines + vignette */
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background:
+      repeating-linear-gradient(0deg, rgba(0, 0, 0, .12) 0 1px, transparent 1px 3px),
+      radial-gradient(ellipse 120% 120% at 50% 50%, transparent 55%, rgba(0, 0, 0, .55));
+  }
+  .reactor { position: absolute; left: 50%; top: 54%; width: 900px; height: 900px;
+    transform: translate(-50%, -50%); pointer-events: none; opacity: .05; }
+  .reactor circle { fill: none; stroke: var(--cyan); }
+  .spin-slow { animation: rot 80s linear infinite; transform-origin: center; }
+  .spin-rev { animation: rot 55s linear infinite reverse; transform-origin: center; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  /* ======== cut-corner frame primitive ======== */
+  .frame { --cut: 14px; position: relative; padding: 1px;
+    background: linear-gradient(160deg, rgba(56,225,255,.45), var(--cyan-dim) 30%, var(--cyan-dim) 70%, rgba(56,225,255,.35));
+    clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+  .frame > .in { clip-path: inherit; background: rgba(6, 13, 24, .88); height: 100%; }
+
+  /* ======== layout ======== */
+  #app { position: relative; z-index: 2; display: grid; height: 100%;
+    grid-template-rows: 58px 1fr 30px; grid-template-columns: 300px 1fr;
+    grid-template-areas: 'top top' 'rail main' 'foot foot';
+    gap: 14px; padding: 14px; max-width: 1700px; margin: 0 auto; }
+
+  /* ---- top bar ---- */
+  #topbar { grid-area: top; display: flex; align-items: center; gap: 18px; padding: 0 20px; }
+  #topbar .in { display: flex; align-items: center; gap: 18px; padding: 0 20px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand b { font-size: 21px; font-weight: 700; letter-spacing: .22em; }
+  .brand b em { color: var(--cyan); font-style: normal; text-shadow: 0 0 12px rgba(56,225,255,.8); }
+  .brand span { font-family: var(--mono); font-size: 9.5px; color: var(--muted); letter-spacing: .1em; }
+  #clock { margin-left: auto; font-family: var(--mono); font-size: 20px; font-weight: 700;
+    letter-spacing: .12em; color: var(--cyan); text-shadow: 0 0 14px rgba(56,225,255,.55); }
+  #clock small { color: var(--muted); font-size: 10px; display: block; text-align: right;
+    letter-spacing: .18em; text-shadow: none; }
+  .sys { display: flex; gap: 8px; }
+  .pill { font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; padding: 5px 10px;
+    border: 1px solid var(--cyan-dim); color: var(--muted); white-space: nowrap;
+    clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); }
+  .pill.on { color: var(--ok); border-color: rgba(61, 255, 162, .3); }
+  .pill .blink { animation: blink 2.4s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+
+  /* ---- modules rail ---- */
+  #rail { grid-area: rail; min-height: 0; }
+  #rail .in { padding: 16px 12px; overflow-y: auto; }
+  .rail-label, .sect { font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+    letter-spacing: .28em; margin: 4px 6px 10px; }
+  .mod { position: relative; padding: 12px 12px 12px 16px; margin-bottom: 8px; cursor: pointer;
+    border: 1px solid transparent; transition: .16s;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+  .mod:hover { background: var(--cyan-soft); }
+  .mod.active { background: linear-gradient(90deg, rgba(56,225,255,.14), rgba(56,225,255,.03));
+    border-color: var(--cyan-dim); }
+  .mod.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px;
+    background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+  .mod .t { display: flex; align-items: center; gap: 9px; font-size: 15.5px; font-weight: 700;
+    letter-spacing: .06em; }
+  .mod .t .ic { font-size: 15px; filter: grayscale(.2); }
+  .mod .t .n { font-family: var(--mono); margin-left: auto; font-size: 9px; color: var(--muted); }
+  .mod .d { font-size: 11px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+  .mod.active .t { color: var(--cyan); text-shadow: 0 0 10px rgba(56,225,255,.4); }
+
+  /* ---- main column ---- */
+  #main { grid-area: main; min-height: 0; display: grid; grid-template-rows: auto 1fr; gap: 14px; }
+  #console { min-height: 0; }
+  #console > .in { padding: 18px 22px; display: flex; flex-direction: column; min-height: 0; }
+
+  #head { }
+  #head .in { padding: 14px 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #head h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: .12em; }
+  #head h2 span { color: var(--cyan); }
+  #head .desc { font-size: 11.5px; color: var(--muted); flex-basis: 100%; margin-top: -4px; }
+  .cmds { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .cmd { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    padding: 7px 14px; cursor: pointer; color: var(--muted); background: rgba(56,225,255,.04);
+    border: 1px solid var(--cyan-dim); transition: .15s; text-transform: uppercase;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  .cmd:hover { color: var(--fg); border-color: rgba(56,225,255,.4); }
+  .cmd.active { color: #04202b; background: var(--cyan); border-color: var(--cyan);
+    box-shadow: 0 0 16px rgba(56,225,255,.5); }
+  .maplink { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--amber);
+    text-decoration: none; border-bottom: 1px dotted; }
+
+  /* ---- form ---- */
+  #form { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px 16px; margin-bottom: 14px; }
+  .field label { display: flex; gap: 6px; align-items: baseline; font-family: var(--mono);
+    font-size: 9.5px; letter-spacing: .18em; color: var(--muted); margin-bottom: 5px;
+    text-transform: uppercase; }
+  .field label .req { color: var(--amber); }
+  .field input[type=text], .field input[type=number], .field select {
+    width: 100%; padding: 9px 11px; font-family: var(--mono); font-size: 12.5px;
+    color: var(--fg); background: rgba(3, 10, 18, .8); border: 1px solid var(--cyan-dim);
+    transition: .15s; }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--cyan);
+    box-shadow: 0 0 0 1px rgba(56,225,255,.3), 0 0 18px rgba(56,225,255,.12); }
+  .field .help { font-size: 10px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+  .field.bool { display: flex; align-items: center; gap: 10px; padding-top: 16px; }
+  .field.bool label { margin: 0; }
+  .tgl { position: relative; width: 40px; height: 20px; cursor: pointer; flex: none; }
+  .tgl input { opacity: 0; width: 0; height: 0; }
+  .tgl i { position: absolute; inset: 0; border: 1px solid var(--cyan-dim);
+    background: rgba(3, 10, 18, .8); transition: .18s;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .tgl i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px;
+    background: var(--muted); transition: .18s;
+    clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px); }
+  .tgl input:checked + i { border-color: var(--cyan); background: rgba(56,225,255,.14); }
+  .tgl input:checked + i::after { left: 23px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+
+  .runrow { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  #run { font-family: var(--disp); font-size: 15px; font-weight: 700; letter-spacing: .22em;
+    padding: 12px 38px; cursor: pointer; color: #032430; border: none;
+    background: linear-gradient(135deg, var(--cyan), #7cf5ff);
+    box-shadow: 0 0 26px rgba(56,225,255,.45); transition: .15s; text-transform: uppercase;
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+  #run:hover { filter: brightness(1.12); }
+  #run:disabled { opacity: .55; cursor: wait; }
+  #elapsed { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: .1em; }
+
+  /* ---- output ---- */
+  #out { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid var(--cyan-dim);
+    padding-top: 12px; }
+  #out-head { display: flex; align-items: center; gap: 10px; font-family: var(--mono);
+    font-size: 11px; letter-spacing: .08em; margin-bottom: 10px; }
+  #out-head .led { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  #out-head.ok .led { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  #out-head.err .led { background: var(--err); box-shadow: 0 0 10px var(--err); }
+  #out-head.ok { color: var(--ok); }
+  #out-head.err { color: var(--err); }
+  #out-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--mono); font-size: 12px; }
+  #out-body::-webkit-scrollbar { width: 8px; height: 8px; }
+  #out-body::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .placeholder { color: var(--muted); font-family: var(--mono); font-size: 11px;
+    letter-spacing: .18em; display: grid; place-items: center; height: 100%;
+    text-align: center; line-height: 2.2; }
+
+  table.hud { border-collapse: collapse; width: 100%; }
+  table.hud th { font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--cyan);
+    text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--cyan-dim);
+    position: sticky; top: 0; background: rgba(6, 13, 24, .95); }
+  table.hud td { padding: 6px 10px; border-bottom: 1px solid rgba(56,225,255,.06);
+    color: var(--fg); vertical-align: top; }
+  table.hud tr:hover td { background: var(--cyan-soft); }
+
+  ul.hud { list-style: none; margin: 0; padding: 0; }
+  ul.hud li { padding: 5px 0 5px 18px; position: relative; border-bottom: 1px solid rgba(56,225,255,.05); }
+  ul.hud li::before { content: '▸'; position: absolute; left: 2px; color: var(--cyan); }
+
+  pre.hud { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+  .j-k { color: var(--cyan); } .j-s { color: #b6f0c8; } .j-n { color: var(--amber); }
+  .j-b { color: #c8a6ff; } .j-null { color: var(--err); }
+
+  #geo { height: 100%; min-height: 320px; display: flex; flex-direction: column; gap: 10px; }
+  #geo .metrics { display: flex; gap: 8px; flex-wrap: wrap; }
+  .metric { font-family: var(--mono); font-size: 10.5px; padding: 6px 11px; letter-spacing: .06em;
+    border: 1px solid var(--cyan-dim); color: var(--fg); background: rgba(56,225,255,.05);
+    clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); }
+  .metric b { color: var(--cyan); font-weight: 700; }
+  #geo .map { flex: 1; min-height: 260px; border: 1px solid var(--cyan-dim); }
+  .leaflet-container { background: #04101c; font-family: var(--mono); }
+  .leaflet-control-attribution { background: rgba(3,7,17,.7) !important; color: var(--muted) !important;
+    font-size: 9px !important; }
+  .leaflet-control-attribution a { color: var(--cyan) !important; }
+  .glow path { filter: drop-shadow(0 0 6px rgba(56,225,255,.9)); }
+
+  /* ---- footer ---- */
+  #foot { grid-area: foot; display: flex; align-items: center; gap: 16px; padding: 0 8px;
+    font-family: var(--mono); font-size: 9.5px; color: var(--muted); letter-spacing: .14em; }
+  #foot .bar { flex: 1; height: 1px; background: linear-gradient(90deg, var(--cyan-dim), transparent); }
+  #foot kbd { border: 1px solid var(--cyan-dim); padding: 1px 6px; font: inherit; color: var(--fg); }
+
+  /* ---- palette ---- */
+  #pal { position: fixed; inset: 0; z-index: 50; display: none; background: rgba(2, 5, 10, .7);
+    backdrop-filter: blur(4px); }
+  #pal.open { display: grid; place-items: start center; padding-top: 14vh; }
+  #pal .box { width: min(560px, 92vw); }
+  #pal input { width: 100%; padding: 14px 18px; font-family: var(--mono); font-size: 14px;
+    color: var(--fg); background: transparent; border: none; outline: none;
+    border-bottom: 1px solid var(--cyan-dim); }
+  #pal-list { max-height: 44vh; overflow-y: auto; }
+  .pal-item { display: flex; align-items: baseline; gap: 10px; padding: 10px 18px; cursor: pointer;
+    font-family: var(--mono); font-size: 12px; }
+  .pal-item .path { color: var(--cyan); }
+  .pal-item .h { color: var(--muted); font-size: 10.5px; margin-left: auto; text-align: right; }
+  .pal-item.sel { background: var(--cyan-soft); box-shadow: inset 2px 0 0 var(--cyan); }
+
+  /* ---- boot ---- */
+  #boot { position: fixed; inset: 0; z-index: 100; background: var(--bg);
+    display: grid; place-items: center; transition: opacity .5s; }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .core { text-align: center; }
+  #boot .rings { width: 160px; height: 160px; margin: 0 auto 26px; position: relative; }
+  #boot .rings svg { position: absolute; inset: 0; }
+  #boot h1 { font-size: 26px; letter-spacing: .5em; margin: 0 0 6px; font-weight: 700; }
+  #boot h1 em { color: var(--cyan); font-style: normal; text-shadow: 0 0 16px var(--cyan); }
+  #boot-log { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: .1em;
+    min-height: 52px; line-height: 1.7; }
+  #boot-log .ok { color: var(--ok); }
+
+  @media (max-width: 900px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 30px;
+      grid-template-areas: 'top' 'rail' 'main' 'foot'; }
+    #rail .in { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
+    .mod { min-width: 190px; margin: 0; }
+    .rail-label { display: none; }
+    html, body { overflow: auto; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <svg class="reactor" viewBox="0 0 100 100">
+    <g class="spin-slow"><circle cx="50" cy="50" r="48" stroke-width=".2" stroke-dasharray="4 2"/></g>
+    <g class="spin-rev"><circle cx="50" cy="50" r="38" stroke-width=".35" stroke-dasharray="12 6"/></g>
+    <g class="spin-slow"><circle cx="50" cy="50" r="27" stroke-width=".2" stroke-dasharray="1 3"/></g>
+  </svg>
+</div>
+
+<div id="app">
+  <div id="topbar" class="frame"><div class="in">
+    <div class="brand"><b>SUPER<em>·</em>MENU</b><span>COMMAND DECK v0.1</span></div>
+    <div class="sys">
+      <span class="pill on"><span class="blink">●</span> SYSTEMS NOMINAL</span>
+      <span class="pill" id="pill-mods">— MODULES</span>
+    </div>
+    <div id="clock">--:--:--<small>—</small></div>
+  </div></div>
+
+  <div id="rail" class="frame"><div class="in">
+    <div class="rail-label">// MODULES</div>
+    <div id="mods"></div>
+  </div></div>
+
+  <div id="main">
+    <div id="head" class="frame"><div class="in">
+      <h2 id="p-name">STANDBY<span></span></h2>
+      <div class="cmds" id="cmds"></div>
+      <div class="desc" id="p-desc">Select a module from the rail, or press Ctrl+K.</div>
+    </div></div>
+
+    <div id="console" class="frame"><div class="in">
+      <div id="form"></div>
+      <div class="runrow" id="runrow" style="display:none">
+        <button id="run">Execute</button>
+        <span id="elapsed"></span>
+      </div>
+      <div id="out">
+        <div id="out-head" style="display:none"><span class="led"></span><span id="out-sum"></span></div>
+        <div id="out-body"><div class="placeholder">AWAITING DIRECTIVE<br/>SELECT MODULE // COMMAND // EXECUTE</div></div>
+      </div>
+    </div></div>
+  </div>
+
+  <div id="foot">
+    <span>SUPER-MENU // LOCAL INSTANCE</span><span class="bar"></span>
+    <span><kbd>Ctrl</kbd>+<kbd>K</kbd> COMMAND PALETTE</span>
+  </div>
+</div>
+
+<div id="pal"><div class="box frame"><div class="in">
+  <input id="pal-q" placeholder="type a command…" autocomplete="off" />
+  <div id="pal-list"></div>
+</div></div></div>
+
+<div id="boot">
+  <div class="core">
+    <div class="rings">
+      <svg viewBox="0 0 100 100"><g class="spin-rev"><circle cx="50" cy="50" r="46" fill="none" stroke="#38e1ff" stroke-width=".6" stroke-dasharray="20 8" opacity=".7"/></g></svg>
+      <svg viewBox="0 0 100 100"><g class="spin-slow"><circle cx="50" cy="50" r="34" fill="none" stroke="#38e1ff" stroke-width="1" stroke-dasharray="4 4" opacity=".5"/></g></svg>
+      <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="16" fill="none" stroke="#38e1ff" stroke-width="2" opacity=".9"><animate attributeName="r" values="14;17;14" dur="2s" repeatCount="indefinite"/></circle></svg>
+    </div>
+    <h1>SUPER<em>·</em>MENU</h1>
+    <div id="boot-log"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { menu: null, plugin: null, command: null };
+
+/* ======== boot sequence ======== */
+const bootLines = [
+  'INITIALIZING COMMAND DECK…',
+  'LINKING PLUGIN REGISTRY…',
+  'CALIBRATING RENDERERS [TABLE·LIST·TEXT·JSON·GEO]…',
+];
+(async () => {
+  const log = $('boot-log');
+  for (const line of bootLines) {
+    log.innerHTML += line + '<br/>';
+    await new Promise(r => setTimeout(r, 320));
+  }
+  try {
+    const r = await fetch('/api/menu');
+    state.menu = await r.json();
+    log.innerHTML += `<span class="ok">${state.menu.plugins.length} MODULES ONLINE — ALL SYSTEMS GO</span>`;
+  } catch (e) {
+    log.innerHTML += '<span style="color:var(--err)">REGISTRY OFFLINE</span>';
+  }
+  await new Promise(r => setTimeout(r, 550));
+  $('boot').classList.add('done');
+  if (state.menu) initUI();
+})();
+$('boot').onclick = () => $('boot').classList.add('done');
+
+/* ======== clock ======== */
+setInterval(() => {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  $('clock').innerHTML = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}` +
+    `<small>${d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: 'short' }).toUpperCase()}</small>`;
+}, 1000);
+
+/* ======== modules rail ======== */
+function initUI() {
+  $('pill-mods').textContent = `${state.menu.plugins.length} MODULES`;
+  const mods = $('mods');
+  mods.innerHTML = '';
+  for (const p of state.menu.plugins) {
+    const el = document.createElement('div');
+    el.className = 'mod';
+    el.dataset.id = p.id;
+    el.innerHTML = `<div class="t"><span class="ic">${p.icon}</span>${esc(p.name).toUpperCase()}
+        <span class="n">${p.commands.length} CMD</span></div>
+      <div class="d">${esc(p.description)}</div>`;
+    el.onclick = () => selectPlugin(p.id);
+    mods.appendChild(el);
+  }
+}
+
+function selectPlugin(id, cmdName) {
+  state.plugin = state.menu.plugins.find(p => p.id === id) || null;
+  document.querySelectorAll('.mod').forEach(m => m.classList.toggle('active', m.dataset.id === id));
+  if (!state.plugin) return;
+  $('p-name').innerHTML = `${esc(state.plugin.name).toUpperCase()}<span> // MODULE</span>`;
+  $('p-desc').innerHTML = esc(state.plugin.description) +
+    (id === 'route-avoider' ? ' &nbsp;<a class="maplink" href="/route" target="_blank">OPEN TACTICAL MAP ↗</a>' : '');
+  const cmds = $('cmds');
+  cmds.innerHTML = '';
+  for (const c of state.plugin.commands) {
+    const b = document.createElement('button');
+    b.className = 'cmd';
+    b.textContent = c.name;
+    b.title = c.help;
+    b.onclick = () => selectCommand(c.name);
+    cmds.appendChild(b);
+  }
+  selectCommand(cmdName || state.plugin.commands[0]?.name);
+}
+
+function selectCommand(name) {
+  state.command = state.plugin.commands.find(c => c.name === name) || null;
+  document.querySelectorAll('.cmd').forEach(b =>
+    b.classList.toggle('active', b.textContent === name));
+  buildForm();
+}
+
+/* ======== auto-form from Param metadata ======== */
+function buildForm() {
+  const form = $('form');
+  form.innerHTML = '';
+  if (!state.command) { $('runrow').style.display = 'none'; return; }
+  for (const p of state.command.params) {
+    const f = document.createElement('div');
+    const req = p.required ? '<span class="req">▲ REQ</span>' : '';
+    if (p.type === 'bool') {
+      f.className = 'field bool';
+      f.innerHTML = `<label class="tgl"><input type="checkbox" data-param="${p.name}"
+          ${p.default ? 'checked' : ''}/><i></i></label>
+        <label>${esc(p.name)} ${req}</label>`;
+    } else if (p.choices) {
+      f.className = 'field';
+      f.innerHTML = `<label>${esc(p.name)} ${req}</label>
+        <select data-param="${p.name}">
+          ${p.required ? '' : '<option value="">—</option>'}
+          ${p.choices.map(c => `<option ${c === p.default ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+        </select>
+        ${p.help ? `<div class="help">${esc(p.help)}</div>` : ''}`;
+    } else {
+      f.className = 'field';
+      const t = (p.type === 'int' || p.type === 'float') ? 'number' : 'text';
+      const step = p.type === 'float' ? ' step="any"' : '';
+      f.innerHTML = `<label>${esc(p.name)} ${req}</label>
+        <input type="${t}"${step} data-param="${p.name}"
+          value="${p.default != null ? esc(String(p.default)) : ''}" placeholder="${esc(p.help || p.name)}" />
+        ${p.help ? `<div class="help">${esc(p.help)}</div>` : ''}`;
+    }
+    form.appendChild(f);
+  }
+  $('runrow').style.display = 'flex';
+  form.querySelectorAll('input[type=text]').forEach(i =>
+    i.addEventListener('keydown', e => { if (e.key === 'Enter') execute(); }));
+}
+
+function collectParams() {
+  const params = {};
+  document.querySelectorAll('[data-param]').forEach(el => {
+    const name = el.dataset.param;
+    if (el.type === 'checkbox') params[name] = el.checked;
+    else if (el.value !== '') params[name] = el.value;
+  });
+  return params;
+}
+
+/* ======== execute ======== */
+async function execute() {
+  if (!state.plugin || !state.command) return;
+  const btn = $('run');
+  btn.disabled = true;
+  btn.textContent = 'EXECUTING…';
+  const t0 = performance.now();
+  let res;
+  try {
+    const r = await fetch('/api/run', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin: state.plugin.id, command: state.command.name,
+                             params: collectParams() }) });
+    res = await r.json();
+  } catch (e) {
+    res = { ok: false, summary: 'link failure — is the server running?', kind: 'text', data: null };
+  }
+  const ms = Math.round(performance.now() - t0);
+  $('elapsed').textContent = `T+${ms}ms`;
+  btn.disabled = false;
+  btn.textContent = 'EXECUTE';
+  renderResult(res);
+}
+$('run').onclick = execute;
+
+/* ======== result renderers (one per CommandResult.kind) ======== */
+function renderResult(res) {
+  const head = $('out-head');
+  head.style.display = 'flex';
+  head.className = res.ok ? 'ok' : 'err';
+  $('out-sum').textContent = (res.ok ? 'OK — ' : 'ERROR — ') + (res.summary || res.kind);
+  const body = $('out-body');
+  body.innerHTML = '';
+  if (!res.ok) {
+    body.innerHTML = `<pre class="hud" style="color:var(--err)">${esc(res.summary || 'failed')}</pre>`;
+    return;
+  }
+  const k = res.kind;
+  if (k === 'table' && Array.isArray(res.data)) renderTable(body, res);
+  else if (k === 'geojson' && res.data) renderGeo(body, res.data);
+  else if (k === 'list' && Array.isArray(res.data)) {
+    body.innerHTML = `<ul class="hud">${res.data.map(x => `<li>${esc(String(x))}</li>`).join('')}</ul>`;
+  } else if (k === 'json' || typeof res.data === 'object') {
+    body.innerHTML = `<pre class="hud">${jsonHtml(res.data)}</pre>`;
+  } else {
+    body.innerHTML = `<pre class="hud">${esc(String(res.data ?? res.summary))}</pre>`;
+  }
+}
+
+function renderTable(body, res) {
+  const cols = res.columns || Object.keys(res.data[0] || {});
+  const rows = res.data.map(r =>
+    `<tr>${cols.map(c => `<td>${esc(String(r[c] ?? ''))}</td>`).join('')}</tr>`).join('');
+  body.innerHTML = `<table class="hud"><thead><tr>${cols.map(c =>
+    `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* geojson → dark Leaflet map with the HUD route styling + metric chips */
+let leafletReady = null;
+function ensureLeaflet() {
+  if (leafletReady) return leafletReady;
+  leafletReady = new Promise(resolve => {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(css);
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => resolve(window.L);
+    document.head.appendChild(s);
+  });
+  return leafletReady;
+}
+
+async function renderGeo(body, geojson) {
+  const skip = new Set(['type', 'features', 'bbox']);
+  const metrics = Object.entries(geojson)
+    .filter(([k, v]) => !skip.has(k) && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'))
+    .map(([k, v]) => `<span class="metric">${esc(k.replace(/_/g, ' '))} <b>${esc(String(v))}</b></span>`)
+    .join('');
+  body.innerHTML = `<div id="geo">${metrics ? `<div class="metrics">${metrics}</div>` : ''}
+    <div class="map" id="geo-map"></div></div>`;
+  const L = await ensureLeaflet();
+  const map = L.map('geo-map', { zoomControl: true });
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20, subdomains: 'abcd',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+  }).addTo(map);
+  const styleFor = f => {
+    const kind = (f.properties || {}).kind;
+    if (kind === 'avoid') return { color: '#ffb454', weight: 2, dashArray: '6 6', fillColor: '#ffb454', fillOpacity: .12 };
+    return { color: '#38e1ff', weight: 4, opacity: .95, className: 'glow' };
+  };
+  const layer = L.geoJSON(geojson, {
+    style: styleFor,
+    pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+      radius: 7, color: '#04101c', weight: 2, fillOpacity: 1,
+      fillColor: (f.properties || {}).kind === 'destination' ? '#ff5470' : '#3dffa2',
+    }).bindTooltip((f.properties || {}).label || '', { permanent: false }),
+  }).addTo(map);
+  const b = layer.getBounds();
+  if (b.isValid()) map.fitBounds(b.pad(0.18)); else map.setView([53.4, -2.2], 5);
+}
+
+/* ======== JSON highlighter ======== */
+function jsonHtml(obj) {
+  const raw = JSON.stringify(obj, null, 2);
+  return esc(raw).replace(
+    /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
+    (m, str, colon, bool) => {
+      if (str) return colon ? `<span class="j-k">${str}</span>${colon}` : `<span class="j-s">${str}</span>`;
+      if (bool) return `<span class="j-b">${m}</span>`;
+      if (m === 'null') return `<span class="j-null">null</span>`;
+      return `<span class="j-n">${m}</span>`;
+    });
+}
+
+/* ======== command palette ======== */
+const pal = $('pal'), palQ = $('pal-q'), palList = $('pal-list');
+let palSel = 0;
+function palItems(q) {
+  const items = [];
+  for (const p of state.menu?.plugins || [])
+    for (const c of p.commands)
+      items.push({ p, c, key: `${p.id} ${c.name} ${c.help}`.toLowerCase() });
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  return items.filter(i => terms.every(t => i.key.includes(t))).slice(0, 12);
+}
+function palRender() {
+  const items = palItems(palQ.value);
+  palList.innerHTML = items.map((i, n) =>
+    `<div class="pal-item ${n === palSel ? 'sel' : ''}" data-n="${n}">
+       <span class="path">${esc(i.p.id)} › ${esc(i.c.name)}</span>
+       <span class="h">${esc(i.c.help)}</span></div>`).join('');
+  palList.querySelectorAll('.pal-item').forEach(el =>
+    el.onclick = () => palGo(items[+el.dataset.n]));
+  return items;
+}
+function palGo(item) {
+  palClose();
+  selectPlugin(item.p.id, item.c.name);
+}
+function palOpen() { pal.classList.add('open'); palQ.value = ''; palSel = 0; palRender(); palQ.focus(); }
+function palClose() { pal.classList.remove('open'); }
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palOpen(); }
+  else if (e.key === 'Escape') palClose();
+  else if (pal.classList.contains('open')) {
+    const items = palItems(palQ.value);
+    if (e.key === 'ArrowDown') { palSel = Math.min(palSel + 1, items.length - 1); palRender(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { palSel = Math.max(palSel - 1, 0); palRender(); e.preventDefault(); }
+    else if (e.key === 'Enter' && items[palSel]) palGo(items[palSel]);
+  }
+});
+palQ.addEventListener('input', () => { palSel = 0; palRender(); });
+pal.addEventListener('click', e => { if (e.target === pal) palClose(); });
+
+/* ======== util ======== */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+</script>
+</body>
+</html>

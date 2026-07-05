@@ -7,7 +7,13 @@ returning a `CommandResult`; the surfaces render from that metadata.
 ## Layout
 - `src/super_menu/core/plugin.py` — `Plugin` / `Command` / `Param` / `CommandResult` (the contract).
 - `src/super_menu/core/registry.py` — auto-discovers any `super_menu.plugins.<name>` exposing `PLUGIN`.
-- `src/super_menu/cli.py` — entry point: no args → TUI; `<plugin> <cmd>` → headless; `mcp` → MCP server.
+- `src/super_menu/cli.py` — entry point: no args → TUI; `<plugin> <cmd>` → headless; `mcp` → MCP
+  server; `web` → the dashboard.
+- `src/super_menu/web/` — **the primary surface** (user direction 2026-07: web-first): a
+  Jarvis-style HUD dashboard (`server.py` stdlib server + `static/index.html`) that, like the TUI,
+  builds itself from plugin metadata (`GET /api/menu` → auto-forms; `POST /api/run` →
+  `CommandResult.to_dict()`, rendered per `kind`, geojson as a dark Leaflet map). No login, no
+  server state. The route-avoider's dedicated planner stays mounted at `/route`.
 - `src/super_menu/tui/app.py` — Textual app; auto-builds forms + result tables.
 - `src/super_menu/mcp_server.py` — low-level `mcp.server` exposing each command as a tool.
 - `src/super_menu/plugins/free_for_dev/` — reference plugin (fetch + parse + search).
@@ -22,9 +28,10 @@ returning a `CommandResult`; the surfaces render from that metadata.
   (`adapter.py` = `RoutingAdapter` + `ORSAdapter` + self-hosted `ValhallaAdapter` + offline
   `StubAdapter`; `geo.py` = pure geometry/parsing; `plugin.py` = commands). Engine picked by
   `active_adapter()`: `VALHALLA_URL` > `ORS_API_KEY` > offline estimator, so it installs/demos/
-  tests with zero setup (the free-for-dev seed pattern). `super-menu web` serves a 4th surface
-  (Leaflet map, `webserver.py`) rendering the same `geojson` payload; `deploy/` stands up a
-  self-hosted Valhalla via Docker. Pure `geo.py` + the stub keep it fully unit-testable offline.
+  tests with zero setup (the free-for-dev seed pattern). Its dedicated map planner
+  (`webserver.py` + `web/index.html`) is mounted at `/route` in the web dashboard; `deploy/`
+  stands up a self-hosted Valhalla via Docker (see its README for the service-limit and WSL
+  memory gotchas). Pure `geo.py` + the stub keep it fully unit-testable offline.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be
