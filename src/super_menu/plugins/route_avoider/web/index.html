@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>super-menu · route avoider</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<style>
+  :root { --bg:#1a1b26; --panel:#24283b; --line:#414868; --fg:#c0caf5;
+          --muted:#7982a9; --accent:#7aa2f7; --ok:#9ece6a; --err:#f7768e;
+          --route:#7dcfff; --zone:#e0af68; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; font-family: ui-sans-serif, system-ui, sans-serif;
+               color: var(--fg); background: var(--bg); }
+  #map { position:absolute; inset:0; }
+  .leaflet-container { background:#0d0e14; }
+  #panel { position:absolute; z-index:1000; top:12px; left:12px; width:300px;
+           background: color-mix(in srgb, var(--panel) 92%, transparent);
+           border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+           backdrop-filter: blur(6px); box-shadow:0 8px 30px rgba(0,0,0,.45); }
+  h1 { margin:0 0 2px; font-size:15px; letter-spacing:.5px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size:11px; margin-bottom:10px; }
+  .modes { display:flex; gap:6px; margin-bottom:10px; }
+  .modes button { flex:1; padding:7px 0; font-size:11px; cursor:pointer;
+                  color:var(--fg); background:#2a2e44; border:1px solid var(--line);
+                  border-radius:8px; transition:.12s; }
+  .modes button.active { background: var(--accent); color:#0d0e14; border-color:var(--accent);
+                         font-weight:600; }
+  .row { display:flex; align-items:center; justify-content:space-between;
+         gap:8px; margin:8px 0; font-size:12px; }
+  input[type=range] { flex:1; accent-color: var(--accent); }
+  select { background:#2a2e44; color:var(--fg); border:1px solid var(--line);
+           border-radius:6px; padding:4px 6px; font-size:12px; }
+  .btns { display:flex; gap:8px; margin-top:12px; }
+  .btns button { flex:1; padding:9px 0; font-size:12px; font-weight:600; cursor:pointer;
+                 border-radius:8px; border:1px solid transparent; }
+  #route-btn { background: var(--accent); color:#0d0e14; }
+  #clear-btn { background:#2a2e44; color:var(--fg); border-color:var(--line); }
+  #summary { margin-top:12px; padding:10px; border-radius:8px; font-size:12px;
+             background:#2a2e44; border:1px solid var(--line); min-height:18px; }
+  #summary.ok { border-color: var(--ok); }
+  #summary.err { border-color: var(--err); color: var(--err); }
+  .metric { display:flex; justify-content:space-between; margin:2px 0; }
+  .metric b { color: var(--accent); }
+  .hint { color: var(--muted); font-size:11px; margin-top:10px; line-height:1.4; }
+  .badge { font-size:10px; padding:1px 6px; border-radius:6px; background:#2a2e44;
+           border:1px solid var(--line); color:var(--muted); }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel">
+  <h1>super<span>·</span>menu — route avoider <span id="engine" class="badge">…</span></h1>
+  <div class="sub">Click the map to place points, then route around your zones.</div>
+
+  <div class="modes">
+    <button data-mode="origin" class="active">① start</button>
+    <button data-mode="destination">② end</button>
+    <button data-mode="avoid">＋ avoid zone</button>
+  </div>
+
+  <div class="row"><span>Avoid radius</span>
+    <input id="radius" type="range" min="1" max="60" value="12" />
+    <span id="radius-val" style="width:44px;text-align:right">12 km</span></div>
+  <div class="row"><span>Travel mode</span>
+    <select id="profile">
+      <option value="driving-car">driving</option>
+      <option value="cycling-regular">cycling</option>
+      <option value="foot-walking">walking</option>
+    </select></div>
+  <div class="row"><label for="motorways">Avoid motorways</label>
+    <input id="motorways" type="checkbox" /></div>
+
+  <div class="btns">
+    <button id="route-btn">Find route</button>
+    <button id="clear-btn">Clear</button>
+  </div>
+
+  <div id="summary">Set a start and an end point.</div>
+  <div class="hint">Mode buttons pick what your next click drops.
+    Click an avoid circle to remove it.</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const map = L.map('map', { zoomControl: true }).setView([53.5, -2.5], 6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+let mode = 'origin';
+let origin = null, destination = null;
+const zones = [];                 // {lat,lng,radius_km, circle, marker}
+let originMarker = null, destMarker = null, routeLayer = null;
+
+const $ = id => document.getElementById(id);
+
+document.querySelectorAll('.modes button').forEach(b =>
+  b.onclick = () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('.modes button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  });
+
+$('radius').oninput = e => $('radius-val').textContent = e.target.value + ' km';
+
+const pin = (latlng, color, label) => L.marker(latlng, {
+  icon: L.divIcon({ className: '', html:
+    `<div style="background:${color};color:#0d0e14;font-weight:700;border-radius:50%;
+      width:22px;height:22px;display:flex;align-items:center;justify-content:center;
+      border:2px solid #0d0e14;box-shadow:0 1px 4px rgba(0,0,0,.6)">${label}</div>`,
+    iconSize:[22,22], iconAnchor:[11,11] })
+}).addTo(map);
+
+map.on('click', e => {
+  if (mode === 'origin') {
+    origin = e.latlng; if (originMarker) map.removeLayer(originMarker);
+    originMarker = pin(origin, '#9ece6a', 'A');
+  } else if (mode === 'destination') {
+    destination = e.latlng; if (destMarker) map.removeLayer(destMarker);
+    destMarker = pin(destination, '#f7768e', 'B');
+  } else {
+    const radius_km = +$('radius').value;
+    const circle = L.circle(e.latlng, { radius: radius_km*1000, color:'#e0af68',
+      weight:1.5, fillColor:'#e0af68', fillOpacity:.12 }).addTo(map);
+    const z = { lat:e.latlng.lat, lng:e.latlng.lng, radius_km, circle };
+    circle.on('click', ev => { L.DomEvent.stop(ev); map.removeLayer(circle);
+      zones.splice(zones.indexOf(z), 1); });
+    zones.push(z);
+  }
+});
+
+async function route() {
+  if (!origin || !destination) { setSummary('Set a start and an end point.', 'err'); return; }
+  setSummary('Routing…', '');
+  const body = {
+    origin: { lat: origin.lat, lng: origin.lng },
+    destination: { lat: destination.lat, lng: destination.lng },
+    avoid_zones: zones.map(z => ({ lat:z.lat, lng:z.lng, radius_km:z.radius_km })),
+    avoid_motorways: $('motorways').checked,
+    profile: $('profile').value,
+  };
+  let data;
+  try {
+    const r = await fetch('/api/route', { method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    data = await r.json();
+  } catch (err) { setSummary('Request failed: ' + err, 'err'); return; }
+  if (!data.ok) { setSummary(data.error || 'no route', 'err'); return; }
+
+  if (routeLayer) map.removeLayer(routeLayer);
+  routeLayer = L.geoJSON(data.geojson, {
+    filter: f => f.geometry.type === 'LineString',
+    style: { color:'#7dcfff', weight:4, opacity:.9 }
+  }).addTo(map);
+  if (routeLayer.getBounds().isValid()) map.fitBounds(routeLayer.getBounds().pad(0.15));
+
+  const g = data.geojson;
+  setSummary(`<div class="metric"><span>Distance</span><b>${g.distance_km} km</b></div>
+    <div class="metric"><span>Duration</span><b>${g.duration_min} min</b></div>
+    <div class="metric"><span>Zones avoided</span><b>${g.avoid_zones_applied}</b></div>
+    <div class="metric"><span>Engine</span><b>${g.live ? g.engine : g.engine+' (estimate)'}</b></div>`,
+    'ok');
+}
+
+function setSummary(html, cls) {
+  const s = $('summary'); s.innerHTML = html; s.className = cls || '';
+}
+
+$('route-btn').onclick = route;
+$('clear-btn').onclick = () => {
+  [originMarker, destMarker, routeLayer, ...zones.map(z => z.circle)]
+    .forEach(l => l && map.removeLayer(l));
+  origin = destination = originMarker = destMarker = routeLayer = null;
+  zones.length = 0;
+  setSummary('Set a start and an end point.', '');
+};
+
+fetch('/api/status').then(r => r.json()).then(s => {
+  $('engine').textContent = s.live ? s.engine : 'offline estimate';
+  $('engine').title = s.live ? 'live routing' : 'set ORS_API_KEY for real road routing';
+}).catch(() => {});
+</script>
+</body>
+</html>

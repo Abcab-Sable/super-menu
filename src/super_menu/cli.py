@@ -5,6 +5,7 @@
     super-menu <plugin>             list a plugin's commands
     super-menu <plugin> <cmd> ...   run a command (headless)
     super-menu mcp                  run the MCP server (stdio) for Claude Code
+    super-menu web                  launch the route-planner web UI (real road map)
 
 Headless command runs accept ``--name value`` / ``--name=value`` flags matching
 the command's params, plus ``--json`` to emit the raw structured result.
@@ -173,6 +174,14 @@ def main(argv: list[str] | None = None) -> int:
     if head == "mcp":
         from super_menu.mcp_server import run as run_mcp
         run_mcp()
+        return 0
+    if head == "web":
+        from super_menu.plugins.route_avoider.webserver import run as run_web
+        port = 8765
+        for tok in argv[1:]:
+            if tok.startswith("--port"):
+                port = int(tok.split("=", 1)[1]) if "=" in tok else port
+        run_web(port=port)
         return 0
     if head == "list":
         return _list_plugins()
