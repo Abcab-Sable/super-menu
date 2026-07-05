@@ -18,6 +18,7 @@ import sys
 from typing import Any
 
 from super_menu.core import braille
+from super_menu.core.config import load_dotenv
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult
 
@@ -159,6 +160,7 @@ def _force_utf8() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8()
+    load_dotenv()  # pick up ORS_API_KEY (etc.) from a .env in the working directory
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if not argv:
