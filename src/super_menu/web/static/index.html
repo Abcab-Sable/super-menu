@@ -198,6 +198,10 @@
   .metric b { color: var(--cyan); font-weight: 700; }
   #geo .map { flex: 1; min-height: 260px; border: 1px solid var(--cyan-dim); }
   .leaflet-container { background: #04101c; font-family: var(--mono); }
+  /* Stark-style basemap: CARTO *voyager* (light) tiles inverted + warmed into a
+     high-contrast tactical display — roads read as amber circuitry, labels stay
+     bright, and the cyan route pops on top. Tuned live against zoom 6 and 13. */
+  .stark-tiles { filter: invert(1) sepia(.32) hue-rotate(158deg) saturate(1.9) brightness(1.5) contrast(.88); }
   .leaflet-control-attribution { background: rgba(3,7,17,.7) !important; color: var(--muted) !important;
     font-size: 9px !important; }
   .leaflet-control-attribution a { color: var(--cyan) !important; }
@@ -597,7 +601,8 @@ async function renderGeo(body, geojson) {
     <div class="map" id="geo-map"></div></div>`;
   const L = await ensureLeaflet();
   const map = L.map('geo-map', { zoomControl: true });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    className: 'stark-tiles',
     maxZoom: 20, subdomains: 'abcd',
     attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
   }).addTo(map);
@@ -681,7 +686,8 @@ function renderTactical() {
 
   ensureLeaflet().then(L => {
     tac.map = L.map('tac-map', { zoomControl: true });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    className: 'stark-tiles',
       maxZoom: 20, subdomains: 'abcd',
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
     }).addTo(tac.map);
