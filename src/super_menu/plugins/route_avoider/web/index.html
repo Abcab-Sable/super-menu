@@ -47,13 +47,26 @@
   .hint { color: var(--muted); font-size:11px; margin-top:10px; line-height:1.4; }
   .badge { font-size:10px; padding:1px 6px; border-radius:6px; background:#2a2e44;
            border:1px solid var(--line); color:var(--muted); }
+  .badge.live { color:#0d0e14; background: var(--ok); border-color: var(--ok); }
+  .search { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+  .search input, #ors-key { width:100%; padding:6px 8px; font-size:12px; color:var(--fg);
+    background:#2a2e44; border:1px solid var(--line); border-radius:8px; }
+  .search input:focus, #ors-key:focus { outline:none; border-color: var(--accent); }
+  details { margin-top:10px; }
+  summary { cursor:pointer; color:var(--muted); font-size:11px; user-select:none; }
+  details a { color: var(--accent); }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div id="panel">
   <h1>super<span>·</span>menu — route avoider <span id="engine" class="badge">…</span></h1>
-  <div class="sub">Click the map to place points, then route around your zones.</div>
+  <div class="sub">Search or click the map to place points, then route around your zones.</div>
+
+  <div class="search">
+    <input id="q-start" placeholder="🔍  start — e.g. Leeds" autocomplete="off" />
+    <input id="q-end" placeholder="🔍  end — e.g. Aberystwyth" autocomplete="off" />
+  </div>
 
   <div class="modes">
     <button data-mode="origin" class="active">① start</button>
@@ -79,6 +92,16 @@
   </div>
 
   <div id="summary">Set a start and an end point.</div>
+
+  <details id="key-box">
+    <summary>Routing engine · get roads that follow real streets</summary>
+    <input id="ors-key" type="password" placeholder="paste ORS API key" autocomplete="off"
+           style="margin-top:8px" />
+    <div class="hint">Free key at
+      <a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener">openrouteservice.org</a>.
+      Without it, routes are a straight-line offline estimate.</div>
+  </details>
+
   <div class="hint">Mode buttons pick what your next click drops.
     Click an avoid circle to remove it.</div>
 </div>
@@ -115,23 +138,47 @@ const pin = (latlng, color, label) => L.marker(latlng, {
     iconSize:[22,22], iconAnchor:[11,11] })
 }).addTo(map);
 
+function setOrigin(latlng) {
+  origin = latlng; if (originMarker) map.removeLayer(originMarker);
+  originMarker = pin(origin, '#9ece6a', 'A');
+}
+function setDestination(latlng) {
+  destination = latlng; if (destMarker) map.removeLayer(destMarker);
+  destMarker = pin(destination, '#f7768e', 'B');
+}
+function addZone(latlng) {
+  const radius_km = +$('radius').value;
+  const circle = L.circle(latlng, { radius: radius_km*1000, color:'#e0af68',
+    weight:1.5, fillColor:'#e0af68', fillOpacity:.12 }).addTo(map);
+  const z = { lat:latlng.lat, lng:latlng.lng, radius_km, circle };
+  circle.on('click', ev => { L.DomEvent.stop(ev); map.removeLayer(circle);
+    zones.splice(zones.indexOf(z), 1); });
+  zones.push(z);
+}
+
 map.on('click', e => {
-  if (mode === 'origin') {
-    origin = e.latlng; if (originMarker) map.removeLayer(originMarker);
-    originMarker = pin(origin, '#9ece6a', 'A');
-  } else if (mode === 'destination') {
-    destination = e.latlng; if (destMarker) map.removeLayer(destMarker);
-    destMarker = pin(destination, '#f7768e', 'B');
-  } else {
-    const radius_km = +$('radius').value;
-    const circle = L.circle(e.latlng, { radius: radius_km*1000, color:'#e0af68',
-      weight:1.5, fillColor:'#e0af68', fillOpacity:.12 }).addTo(map);
-    const z = { lat:e.latlng.lat, lng:e.latlng.lng, radius_km, circle };
-    circle.on('click', ev => { L.DomEvent.stop(ev); map.removeLayer(circle);
-      zones.splice(zones.indexOf(z), 1); });
-    zones.push(z);
-  }
+  if (mode === 'origin') setOrigin(e.latlng);
+  else if (mode === 'destination') setDestination(e.latlng);
+  else addZone(e.latlng);
 });
+
+async function geocodeInto(which) {
+  const input = which === 'origin' ? $('q-start') : $('q-end');
+  const q = input.value.trim();
+  if (!q) return;
+  input.disabled = true;
+  try {
+    const r = await fetch('/api/geocode?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    if (!d.ok) { setSummary(d.error || 'not found', 'err'); return; }
+    const ll = L.latLng(d.lat, d.lng);
+    (which === 'origin' ? setOrigin : setDestination)(ll);
+    map.setView(ll, Math.max(map.getZoom(), 9));
+  } catch (err) { setSummary('geocode failed: ' + err, 'err'); }
+  finally { input.disabled = false; }
+}
+$('q-start').addEventListener('keydown', e => { if (e.key === 'Enter') geocodeInto('origin'); });
+$('q-end').addEventListener('keydown', e => { if (e.key === 'Enter') geocodeInto('destination'); });
 
 async function route() {
   if (!origin || !destination) { setSummary('Set a start and an end point.', 'err'); return; }
@@ -179,10 +226,27 @@ $('clear-btn').onclick = () => {
   setSummary('Set a start and an end point.', '');
 };
 
-fetch('/api/status').then(r => r.json()).then(s => {
-  $('engine').textContent = s.live ? s.engine : 'offline estimate';
-  $('engine').title = s.live ? 'live routing' : 'set ORS_API_KEY for real road routing';
-}).catch(() => {});
+function setEngineBadge(s) {
+  const b = $('engine');
+  b.textContent = s.live ? s.engine : 'offline estimate';
+  b.className = 'badge' + (s.live ? ' live' : '');
+  b.title = s.live ? 'live road routing' : 'paste an ORS key for real road routing';
+}
+
+let keyTimer = null;
+$('ors-key').addEventListener('input', e => {
+  clearTimeout(keyTimer);
+  const key = e.target.value.trim();
+  keyTimer = setTimeout(async () => {
+    try {
+      const r = await fetch('/api/key', { method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({ key }) });
+      setEngineBadge(await r.json());
+    } catch (err) { /* ignore */ }
+  }, 500);
+});
+
+fetch('/api/status').then(r => r.json()).then(setEngineBadge).catch(() => {});
 </script>
 </body>
 </html>

@@ -12,13 +12,16 @@ lives in :func:`handle_route` so it is unit-testable without binding a socket.
 from __future__ import annotations
 
 import json
+import urllib.parse
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from .plugin import cmd_route
+from .plugin import active_adapter, cmd_route, set_api_key
 
 _INDEX = Path(__file__).parent / "web" / "index.html"
+_NOMINATIM = "https://nominatim.openstreetmap.org/search"
 
 
 def handle_route(payload: dict) -> dict:
@@ -53,6 +56,38 @@ def handle_route(payload: dict) -> dict:
     return {"ok": True, "summary": result.summary, "geojson": result.data}
 
 
+def handle_geocode(query: str) -> dict:
+    """Resolve a place name to a point. Uses ORS when a live key is set, else the
+    keyless OpenStreetMap Nominatim geocoder (so search works without a key)."""
+    query = (query or "").strip()
+    if not query:
+        return {"ok": False, "error": "empty query"}
+    engine = active_adapter()
+    if engine.live:
+        try:
+            pt = engine.geocode(query)
+            return {"ok": True, "lat": pt.lat, "lng": pt.lng, "label": query}
+        except Exception:
+            pass  # fall back to Nominatim
+    try:
+        lat, lng, label = _nominatim(query)
+        return {"ok": True, "lat": lat, "lng": lng, "label": label}
+    except Exception as exc:
+        return {"ok": False, "error": f"could not find '{query}': {exc}"}
+
+
+def _nominatim(query: str) -> tuple[float, float, str]:
+    qs = urllib.parse.urlencode({"q": query, "format": "json", "limit": 1})
+    req = urllib.request.Request(
+        f"{_NOMINATIM}?{qs}", headers={"User-Agent": "super-menu-route-avoider/0.1"})
+    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+        rows = json.loads(resp.read().decode("utf-8"))
+    if not rows:
+        raise ValueError("no match")
+    row = rows[0]
+    return float(row["lat"]), float(row["lon"]), row.get("display_name", query)
+
+
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:  # keep the console quiet
         pass
@@ -64,29 +99,40 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_json(self, payload: dict) -> None:
+        self._send(200, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                   "application/json")
+
     def do_GET(self) -> None:
-        if self.path in ("/", "/index.html"):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/", "/index.html"):
             try:
                 self._send(200, _INDEX.read_bytes(), "text/html; charset=utf-8")
             except OSError:
                 self._send(500, b"index.html missing", "text/plain")
-        elif self.path == "/api/status":
-            self._send(200, json.dumps(_status_payload()).encode(), "application/json")
+        elif parsed.path == "/api/status":
+            self._send_json(_status_payload())
+        elif parsed.path == "/api/geocode":
+            q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
+            self._send_json(handle_geocode(q))
         else:
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
-        if self.path != "/api/route":
-            self._send(404, b"not found", "text/plain")
-            return
         length = int(self.headers.get("Content-Length", 0))
         try:
             payload = json.loads(self.rfile.read(length) or b"{}")
-            reply = handle_route(payload)
+            if self.path == "/api/route":
+                reply = handle_route(payload)
+            elif self.path == "/api/key":
+                set_api_key(payload.get("key"))
+                reply = {"ok": True, **_status_payload()}
+            else:
+                self._send(404, b"not found", "text/plain")
+                return
         except Exception as exc:  # never 500 with a stack trace to the browser
             reply = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        self._send(200, json.dumps(reply, ensure_ascii=False).encode("utf-8"),
-                   "application/json")
+        self._send_json(reply)
 
 
 def _status_payload() -> dict:

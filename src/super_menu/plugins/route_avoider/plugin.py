@@ -29,11 +29,22 @@ from .adapter import (
 # of misuse; cap it (the brief's "cap polygon count" mitigation).
 MAX_ZONES = 40
 
+# A key supplied at runtime (e.g. pasted into the web UI) takes precedence over
+# the ORS_API_KEY environment variable, so live routing can be enabled without a
+# restart. None ⇒ fall back to the env var, then the offline estimator.
+_runtime_key: str | None = None
+
+
+def set_api_key(key: str | None) -> None:
+    """Override the ORS key for this process (the web UI uses this)."""
+    global _runtime_key
+    _runtime_key = (key or "").strip() or None
+
 
 def active_adapter() -> RoutingAdapter:
     """The routing engine for this run: live ORS if a key is set, else the offline
     estimator. A module-level seam so tests can swap in a stub engine."""
-    key = os.environ.get("ORS_API_KEY")
+    key = _runtime_key or os.environ.get("ORS_API_KEY")
     if key:
         return ORSAdapter(api_key=key,
                           base_url=os.environ.get("ORS_BASE_URL", DEFAULT_ORS_BASE))

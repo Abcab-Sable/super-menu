@@ -38,6 +38,21 @@ def test_status_payload():
     assert "engine" in s and isinstance(s["live"], bool) and s["profiles"]
 
 
+def test_runtime_key_flips_engine_live():
+    from super_menu.plugins.route_avoider import plugin
+    try:
+        plugin.set_api_key("dummy-key-for-test")
+        s = webserver._status_payload()
+        assert s["live"] is True and s["engine"] == "openrouteservice"
+    finally:
+        plugin.set_api_key(None)          # must not leak into other tests
+    assert webserver._status_payload()["live"] is False
+
+
+def test_geocode_empty_query():
+    assert webserver.handle_geocode("  ")["ok"] is False
+
+
 if __name__ == "__main__":
     test_missing_endpoints_errors()
     test_route_returns_same_geojson_contract()
