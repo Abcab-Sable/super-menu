@@ -187,31 +187,39 @@ def _style_for(props: dict) -> tuple[int, str]:
 # rendering
 # --------------------------------------------------------------------------- #
 
-def render_geojson(geojson: dict, width: int, height: int, *,
-                   basemap: bool = True) -> Text:
+def data_bbox(geojson: dict) -> Optional[tuple[float, float, float, float]]:
+    """``(min_lng, min_lat, max_lng, max_lat)`` over every coordinate, or ``None``."""
+    pts = _all_points(geojson)
+    if not pts:
+        return None
+    lngs = [p[0] for p in pts]
+    lats = [p[1] for p in pts]
+    return (min(lngs), min(lats), max(lngs), max(lats))
+
+
+def render_geojson(geojson: dict, width: int, height: int, *, basemap: bool = True,
+                   view: Optional[tuple[float, float, float, float]] = None,
+                   waypoints: bool = False) -> Text:
     """Render ``geojson`` as a coloured braille map of exactly ``height`` lines.
 
-    The bottom two lines are a scale bar and a marker legend (when there is room);
-    the map fills the rest. Degenerate inputs (no coordinates, a single point, a
-    zero-width span) render without error."""
+    ``view`` frames a specific ``(min_lng, min_lat, max_lng, max_lat)`` window
+    (for zoom/pan); anything outside it is clipped. ``waypoints`` overlays a
+    marker on every line vertex. The bottom rows are a scale bar and a marker
+    legend when there is room; the map fills the rest. Degenerate inputs (no
+    coordinates, a single point, a zero-width span) render without error."""
     width = max(8, int(width))
     height = max(3, int(height))
     legend_lines = _pack(_legend_entries(geojson), width, max_lines=2)
-    # reserve a scale-bar row + however many legend rows there are, but only when
-    # the map would still have breathing room
     reserve = (1 + len(legend_lines)) if height >= 6 + len(legend_lines) else 0
     map_rows = height - reserve
 
-    pts = _all_points(geojson)
-    if not pts:
+    frame = view or data_bbox(geojson)
+    if frame is None:
         return _blank(height)
-
-    mean_lat = sum(p[1] for p in pts) / len(pts)
-    cos_lat = max(0.01, math.cos(math.radians(mean_lat)))
-
-    px = [(p[0] * cos_lat, p[1]) for p in pts]
-    min_x, max_x = min(p[0] for p in px), max(p[0] for p in px)
-    min_y, max_y = min(p[1] for p in px), max(p[1] for p in px)
+    fminlng, fminlat, fmaxlng, fmaxlat = frame
+    cos_lat = max(0.01, math.cos(math.radians((fminlat + fmaxlat) / 2)))
+    min_x, max_x = fminlng * cos_lat, fmaxlng * cos_lat
+    min_y, max_y = fminlat, fmaxlat
     span_x = (max_x - min_x) or 1e-9
     span_y = (max_y - min_y) or 1e-9
 
@@ -225,14 +233,11 @@ def render_geojson(geojson: dict, width: int, height: int, *,
         return (off_x + (lng * cos_lat - min_x) * scale,
                 off_y + (max_y - lat) * scale)     # invert lat: north up
 
-    # world extent visible in this frame (for clipping the basemap)
-    view = ((min_x / cos_lat) - _PAD / scale / cos_lat, min_y - _PAD / scale,
-            (max_x / cos_lat) + _PAD / scale / cos_lat, max_y + _PAD / scale)
-
     if basemap:
-        _draw_basemap(canvas, project, view)
+        _draw_basemap(canvas, project, frame)
 
     markers: list[tuple[float, float, str, str]] = []
+    wp_markers: list[tuple[float, float]] = []
     for geom in _iter_geometries(geojson):
         props = geom.get("_props", {})
         if geom.get("type") == "Point" and geom.get("coordinates"):
@@ -241,11 +246,16 @@ def render_geojson(geojson: dict, width: int, height: int, *,
             markers.append((mx, my, _marker_char(props), _STYLE.get(props.get("kind", ""), "bold")))
             continue
         priority, style = _style_for(props)
+        is_line = geom.get("type") in ("LineString", "MultiLineString")
         for path in _paths(geom):
             proj = [project(pt[0], pt[1]) for pt in path]
             for (x0, y0), (x1, y1) in zip(proj, proj[1:]):
                 canvas.stroke(x0, y0, x1, y1, priority, style)
+            if waypoints and is_line:  # zone-polygon rings aren't waypoints
+                wp_markers.extend(proj)
 
+    for mx, my in wp_markers:            # waypoint dots first — named markers win ties
+        canvas.marker(mx, my, "◇", "bold bright_white")
     for mx, my, ch, style in markers:
         canvas.marker(mx, my, ch, style)
 
@@ -258,14 +268,14 @@ def render_geojson(geojson: dict, width: int, height: int, *,
     return text
 
 
-def _draw_basemap(canvas: _Canvas, project, view) -> None:
-    vminx, vminy, vmaxx, vmaxy = view
+def _draw_basemap(canvas: _Canvas, project, frame) -> None:
+    fminlng, fminlat, fmaxlng, fmaxlat = frame
     prio, style = _PRIORITY["coast"], _STYLE["coast"]
     for line in _coastline():
-        # cheap reject: skip lines whose bbox misses the view entirely
+        # cheap reject: skip lines whose bbox misses the framed window entirely
         xs = [p[0] for p in line]
         ys = [p[1] for p in line]
-        if max(xs) < vminx or min(xs) > vmaxx or max(ys) < vminy or min(ys) > vmaxy:
+        if max(xs) < fminlng or min(xs) > fmaxlng or max(ys) < fminlat or min(ys) > fmaxlat:
             continue
         proj = [project(p[0], p[1]) for p in line]
         for (x0, y0), (x1, y1) in zip(proj, proj[1:]):

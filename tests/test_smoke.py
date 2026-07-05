@@ -117,7 +117,15 @@ def test_tui_renders_geojson_map():
             assert res.kind == "geojson"
             await app._render_result(res, 0.1)
             await pilot.pause()
-            assert app.query_one(GeoMap)
+            gmap = app.query_one(GeoMap)
+            # interactive: zoom in, pan, toggle waypoints — none should raise
+            gmap.action_zoom(1.4)
+            gmap.action_pan(1, -1)
+            gmap.action_toggle_waypoints()
+            await pilot.pause()
+            assert gmap.zoom > 1.0 and gmap.show_waypoints is True
+            gmap.action_reset()
+            assert gmap.zoom == 1.0 and gmap.show_waypoints is False
 
     asyncio.run(_run())
 

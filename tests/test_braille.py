@@ -77,6 +77,26 @@ def test_empty_and_degenerate_inputs():
     assert "S" in "".join(lines)
 
 
+def test_data_bbox():
+    assert braille.data_bbox(LINE_FC) == (-4.0, 52.4, -1.5, 53.8)
+    assert braille.data_bbox({"type": "FeatureCollection", "features": []}) is None
+
+
+def test_view_window_clips_outside():
+    # a window around the origin should keep marker A and drop B (height<6 ⇒ no legend)
+    lines = _plain(braille.render_geojson(
+        LINE_FC, 40, 5, basemap=False, view=(-2.0, 53.4, -1.0, 54.0)))
+    joined = "".join(lines)
+    assert "A" in joined and "B" not in joined
+
+
+def test_waypoints_overlay():
+    off = "".join(_plain(braille.render_geojson(LINE_FC, 40, 14, basemap=False)))
+    on = "".join(_plain(braille.render_geojson(LINE_FC, 40, 14, basemap=False,
+                                               waypoints=True)))
+    assert "◇" in on and "◇" not in off
+
+
 def test_legend_helper():
     leg = braille.legend(LINE_FC)
     assert leg and "Leeds" in leg and "Aberystwyth" in leg
@@ -90,5 +110,8 @@ if __name__ == "__main__":
     test_basemap_adds_coastline()
     test_min_size_is_clamped()
     test_empty_and_degenerate_inputs()
+    test_data_bbox()
+    test_view_window_clips_outside()
+    test_waypoints_overlay()
     test_legend_helper()
     print("all braille tests passed")
