@@ -315,3 +315,129 @@ def _detour_waypoint(a: list[float], b: list[float],
 def _path_km(path: list[list[float]]) -> float:
     return sum(geo.haversine_km(a[1], a[0], b[1], b[0])
                for a, b in zip(path, path[1:]))
+
+
+# --------------------------------------------------------------------------- #
+# Valhalla (self-hosted, live)
+# --------------------------------------------------------------------------- #
+
+class ValhallaAdapter(RoutingAdapter):
+    """Talks to a self-hosted Valhalla server (see ``deploy/docker-compose.yml``).
+
+    No API key and no per-request cost — you run the engine on your own box off a
+    free OSM extract. Valhalla natively supports the avoid-polygon primitive this
+    feature is built on (``exclude_polygons``), so the circle rings pass straight
+    through. Routing only: geocoding is handled elsewhere (the web UI uses
+    Nominatim)."""
+
+    name = "valhalla"
+    live = True
+
+    _COSTING = {"driving-car": "auto", "cycling-regular": "bicycle",
+                "foot-walking": "pedestrian"}
+
+    def __init__(self, base_url: str, timeout: float = 30.0):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+
+    def geocode(self, query: str) -> GeoPoint:
+        raise RoutingError(
+            "Valhalla is routing-only — pass coordinates ('lat,lng'), or use the "
+            "web UI's place search"
+        )
+
+    def route(self, origin, destination, *, avoid_rings, avoid_motorways, profile):
+        body = self._build_body(origin, destination, avoid_rings,
+                                avoid_motorways, profile)
+        return self._parse_route(self._post(f"{self.base_url}/route", body))
+
+    @classmethod
+    def _build_body(cls, origin: GeoPoint, destination: GeoPoint,
+                    avoid_rings: list[geo.Ring], avoid_motorways: bool,
+                    profile: str) -> dict:
+        costing = cls._COSTING.get(profile, "auto")
+        body: dict = {
+            "locations": [{"lat": origin.lat, "lon": origin.lng},
+                          {"lat": destination.lat, "lon": destination.lng}],
+            "costing": costing,
+            "units": "kilometers",
+        }
+        if avoid_rings:  # Valhalla wants a list of [lon, lat] rings — our exact format
+            body["exclude_polygons"] = avoid_rings
+        if avoid_motorways and costing == "auto":
+            body["costing_options"] = {"auto": {"use_highways": 0}}
+        return body
+
+    @staticmethod
+    def _parse_route(payload: dict) -> RouteResult:
+        trip = payload.get("trip", {})
+        if trip.get("status", 0) != 0:
+            raise NoRouteError("no_route", trip.get("status_message") or "no route found")
+        summary = trip.get("summary", {})
+        coords: list[list[float]] = []
+        for leg in trip.get("legs", []):
+            coords += _decode_polyline(leg.get("shape", ""))
+        if not coords:
+            raise NoRouteError("no_route", "the route came back with no geometry")
+        return RouteResult(
+            distance_km=round(summary.get("length", 0.0), 2),
+            duration_min=round(summary.get("time", 0.0) / 60.0, 1),
+            geometry={"type": "LineString", "coordinates": coords},
+            waypoints=len(coords),
+            bbox=geo.bbox_of(coords),
+        )
+
+    def _post(self, url: str, body: dict) -> dict:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            url, data=data, method="POST",
+            headers={"User-Agent": "super-menu/0.1", "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # noqa: S310
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise self._translate_http_error(exc) from exc
+        except urllib.error.URLError as exc:
+            raise RoutingError(
+                f"Valhalla unreachable at {self.base_url} ({exc.reason}) — is the "
+                "container up? (docker compose up -d)") from exc
+
+    @staticmethod
+    def _translate_http_error(exc: urllib.error.HTTPError) -> RoutingError:
+        try:
+            info = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            info = {}
+        # Valhalla error 442 == "No path could be found for input".
+        if info.get("error_code") == 442:
+            return NoRouteError(
+                "no_route",
+                "avoid zones may seal off an endpoint — reduce a radius or remove a zone")
+        return RoutingError(info.get("error") or f"Valhalla error (HTTP {exc.code})")
+
+
+def _decode_polyline(encoded: str, precision: int = 6) -> list[list[float]]:
+    """Decode a Google-encoded polyline into ``[lng, lat]`` pairs.
+
+    Valhalla encodes route geometry at precision 6 (not the usual 5)."""
+    coords: list[list[float]] = []
+    index = lat = lng = 0
+    factor = float(10 ** precision)
+    length = len(encoded)
+    while index < length:
+        for axis in ("lat", "lng"):
+            shift = result = 0
+            while True:
+                byte = ord(encoded[index]) - 63
+                index += 1
+                result |= (byte & 0x1F) << shift
+                shift += 5
+                if byte < 0x20:
+                    break
+            delta = ~(result >> 1) if (result & 1) else (result >> 1)
+            if axis == "lat":
+                lat += delta
+            else:
+                lng += delta
+        coords.append([lng / factor, lat / factor])
+    return coords

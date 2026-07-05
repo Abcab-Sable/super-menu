@@ -19,10 +19,12 @@ returning a `CommandResult`; the surfaces render from that metadata.
   contract generalizes beyond fetch-and-index, not shipping git features.
 - `src/super_menu/plugins/route_avoider/` — area-avoidance route planner (`id = "route-avoider"`);
   the *reference example* for network-backed sources swappable behind an **adapter interface**
-  (`adapter.py` = `RoutingAdapter` + live `ORSAdapter` + offline `StubAdapter`; `geo.py` = pure
-  geometry/parsing; `plugin.py` = commands). Live routing needs `ORS_API_KEY`; with none set it
-  falls back to the labelled offline estimator so it installs/demos/tests with zero setup (the
-  free-for-dev seed pattern). Pure `geo.py` + the stub keep it fully unit-testable offline.
+  (`adapter.py` = `RoutingAdapter` + `ORSAdapter` + self-hosted `ValhallaAdapter` + offline
+  `StubAdapter`; `geo.py` = pure geometry/parsing; `plugin.py` = commands). Engine picked by
+  `active_adapter()`: `VALHALLA_URL` > `ORS_API_KEY` > offline estimator, so it installs/demos/
+  tests with zero setup (the free-for-dev seed pattern). `super-menu web` serves a 4th surface
+  (Leaflet map, `webserver.py`) rendering the same `geojson` payload; `deploy/` stands up a
+  self-hosted Valhalla via Docker. Pure `geo.py` + the stub keep it fully unit-testable offline.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be

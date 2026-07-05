@@ -22,7 +22,7 @@ from super_menu.core.plugin import Plugin, Command, Param, CommandResult
 from . import geo
 from .adapter import (
     DEFAULT_ORS_BASE, PROFILES, GeoPoint, NoRouteError, ORSAdapter,
-    RoutingAdapter, RoutingError, StubAdapter,
+    RoutingAdapter, RoutingError, StubAdapter, ValhallaAdapter,
 )
 
 # A single request handing the router dozens of circles is both slow and a sign
@@ -42,8 +42,12 @@ def set_api_key(key: str | None) -> None:
 
 
 def active_adapter() -> RoutingAdapter:
-    """The routing engine for this run: live ORS if a key is set, else the offline
+    """The routing engine for this run, in priority order: a self-hosted Valhalla
+    (``VALHALLA_URL``), then live ORS (a runtime/env key), then the offline
     estimator. A module-level seam so tests can swap in a stub engine."""
+    valhalla = os.environ.get("VALHALLA_URL")
+    if valhalla:
+        return ValhallaAdapter(base_url=valhalla)
     key = _runtime_key or os.environ.get("ORS_API_KEY")
     if key:
         return ORSAdapter(api_key=key,
@@ -151,20 +155,24 @@ def cmd_presets() -> CommandResult:
 
 def cmd_config() -> CommandResult:
     engine = active_adapter()
+    valhalla = os.environ.get("VALHALLA_URL")
+    if valhalla:
+        note = f"Self-hosted Valhalla active at {valhalla} — no API key, no per-use cost."
+    elif engine.live:
+        note = "Live routing via OpenRouteService is active."
+    else:
+        note = ("Offline estimator active. For real road routing: set VALHALLA_URL to a "
+                "self-hosted engine (see the plugin's deploy/ folder), or ORS_API_KEY "
+                "(free at openrouteservice.org).")
     data = {
         "engine": engine.name,
         "live": engine.live,
-        "ors_api_key_set": bool(os.environ.get("ORS_API_KEY")),
+        "valhalla_url": valhalla or "",
+        "ors_api_key_set": bool(_runtime_key or os.environ.get("ORS_API_KEY")),
         "ors_base_url": os.environ.get("ORS_BASE_URL", DEFAULT_ORS_BASE),
         "profiles": list(PROFILES),
         "presets": list(geo.PRESETS),
-        "note": (
-            "Live routing via OpenRouteService is active."
-            if engine.live else
-            "Offline estimator active. Set ORS_API_KEY (free at openrouteservice.org) "
-            "for real road routing; optionally ORS_BASE_URL to point at a self-hosted "
-            "engine."
-        ),
+        "note": note,
     }
     return CommandResult.ok_(data=data, summary=f"routing engine: {engine.name}",
                              kind="json")

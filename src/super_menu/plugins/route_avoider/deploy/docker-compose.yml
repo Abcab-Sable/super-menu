@@ -1,0 +1,27 @@
+# Self-hosted Valhalla routing for super-menu's route-avoider.
+#
+# Builds routing tiles from a free OpenStreetMap extract, then serves routes with
+# no API key and no per-request cost. See README.md in this folder.
+#
+#   docker compose up -d            # first run downloads the extract + builds tiles
+#   # then add to your repo-root .env:  VALHALLA_URL=http://localhost:8002
+#
+services:
+  valhalla:
+    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
+    container_name: super-menu-valhalla
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./tiles:/custom_files          # built tiles persist here (reused on restart)
+    environment:
+      # Great Britain (~1.5 GB). Swap for ANY extract from https://download.geofabrik.de
+      # e.g. .../europe/germany-latest.osm.pbf — bigger regions need more RAM/disk.
+      - tile_urls=https://download.geofabrik.de/europe/great-britain-latest.osm.pbf
+      - use_tiles_ignore_pbf=True       # reuse built tiles instead of re-reading the pbf
+      - force_rebuild=False             # set True once to rebuild after changing the region
+      - server_threads=4
+      - build_elevation=False
+      - build_admins=True
+      - build_time_zones=False
+    restart: unless-stopped
