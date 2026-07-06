@@ -21,6 +21,19 @@ EARTH_KM = 6371.0088  # mean Earth radius (IUGG)
 
 MAX_RADIUS_KM = 500.0  # a single avoid circle wider than this is almost certainly a typo
 
+# Single-cell legend keys for avoid zones on the braille map. The renderer draws
+# a marker exactly one character wide, so numbering zones "1".."40" would collapse
+# zone 10 onto "1" — colliding on the map and, since the legend is keyed by that
+# char, silently dropping zones 10+ from the legend. These glyphs stay distinct
+# well past MAX_ZONES and avoid the A/B endpoint markers; the zone's human label
+# ("zone N" or its name) still carries the number.
+_ZONE_MARKERS = "123456789abcdefghijklmnopqrstuvwxyzCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def zone_marker(i: int) -> str:
+    """Compact one-char legend key for the ``i``-th (1-based) avoid zone."""
+    return _ZONE_MARKERS[i - 1] if 1 <= i <= len(_ZONE_MARKERS) else "#"
+
 # GeoJSON ring: a closed list of [lng, lat] pairs.
 Ring = list[list[float]]
 
@@ -249,9 +262,10 @@ def feature_collection(route_geometry: dict, specs: list[AvoidSpec],
             "geometry": {"type": "Polygon",
                          "coordinates": [circle_ring(s.lat, s.lng, s.radius_km)]},  # type: ignore[arg-type]
         })
-        features.append({  # numbered centre marker so the zone shows up in the legend
+        features.append({  # centre marker (compact 1-char key) so the zone shows in the legend
             "type": "Feature",
-            "properties": {"kind": "avoid", "marker": str(i), "label": s.label or f"zone {i}"},
+            "properties": {"kind": "avoid", "marker": zone_marker(i),
+                           "label": s.label or f"zone {i}"},
             "geometry": {"type": "Point", "coordinates": [s.lng, s.lat]},
         })
     for kind, marker, label, (lat, lng) in (
