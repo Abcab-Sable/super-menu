@@ -50,22 +50,19 @@ Valhalla's stock config caps `exclude_polygons` at a **10 km circumference**, an
 cap is on the *summed* perimeter of **every** avoid zone in a request — not per zone.
 A ~1.6 km-radius circle already fills 10 km, so any real avoid set is rejected with
 "Exceeded maximum circumference for exclude_polygons". (The obvious "raise it to
-1,000,000 m" is a trap: that's ~160 km of *total* perimeter, still well under what a
-handful of zones sum to.)
+1,000,000 m" is a trap: that's ~1,000 km of *total* perimeter — only a single
+~160 km-radius zone's worth — still well under what a handful of zones sum to.)
 
-So this deploy just removes the ceiling. The tracked `tiles/valhalla.json` seeds
-`service_limits.max_exclude_polygons_length` at **1,000,000,000 m**, which the
-container deep-merges into the generated config on first build
-(`update_existing_config=True` fills in every other key). That's ~8× the plugin's own
-hard maximum — 40 zones × 500 km radius ≈ 1.26×10⁸ m of perimeter — so under the
-plugin's `MAX_ZONES` / `MAX_RADIUS_KM` caps you *can't* reach the limit. There is
-nothing to configure.
+So this deploy just removes the ceiling. The tracked `tiles/valhalla.json` is a
+one-key seed setting `service_limits.max_exclude_polygons_length` to
+**1,000,000,000 m**; the container deep-merges it into the freshly generated config
+on first build (`update_existing_config=True` backfills every other key, so nothing
+else is pinned). That's ~8× the plugin's own hard maximum — 40 zones × 500 km radius
+≈ 1.26×10⁸ m of perimeter — so under the plugin's `MAX_ZONES` / `MAX_RADIUS_KM` caps
+you *can't* reach the limit. There is nothing to configure.
 
 Pointing super-menu at a **different** Valhalla whose `valhalla.json` lacks this key is
 the only way to still hit the wall; set `max_exclude_polygons_length` there and restart.
-To regenerate this deploy's config fresh for your machine (e.g. to pick up new tuning
-defaults), delete `tiles/valhalla.json` and rebuild — but you'll then need to re-add the
-limit, so editing the one value is usually simpler.
 
 ## Resource guide
 | Coverage | Disk | RAM to build/run | Where |
