@@ -19,6 +19,7 @@ on their own machine. It is not a multi-user hosted service.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -87,19 +88,26 @@ def claude_available() -> bool:
     return shutil.which("claude") is not None
 
 
-def mcp_config() -> dict:
-    """The ``--mcp-config`` payload: run *this* interpreter's ``super-menu mcp``.
+def _mcp_server_cmd() -> tuple[str, list[str]]:
+    """How to launch ``super-menu mcp`` such that it has the optional ``mcp`` dep.
 
-    Referencing ``sys.executable -m super_menu.cli`` avoids depending on the
-    ``super-menu`` console script being on the spawned process's PATH."""
-    return {
-        "mcpServers": {
-            "super-menu": {
-                "command": sys.executable,
-                "args": ["-m", "super_menu.cli", "mcp"],
-            }
-        }
-    }
+    The stdio MCP server needs the ``mcp`` extra. If *this* interpreter already has
+    it, run it directly (fast, no PATH/uv assumptions). Otherwise the web server was
+    likely started with a plain ``uv run super-menu web`` whose env omits the extra —
+    so self-provision it with ``uv run --extra mcp`` rather than crashing on startup
+    (which is what leaves Claude reporting "MCP server still connecting")."""
+    if importlib.util.find_spec("mcp") is not None:
+        return sys.executable, ["-m", "super_menu.cli", "mcp"]
+    uv = shutil.which("uv")
+    if uv is not None:
+        return uv, ["run", "--extra", "mcp", "python", "-m", "super_menu.cli", "mcp"]
+    return sys.executable, ["-m", "super_menu.cli", "mcp"]  # will emit a clear install error
+
+
+def mcp_config() -> dict:
+    """The ``--mcp-config`` payload pointing Claude at super-menu's own MCP server."""
+    command, args = _mcp_server_cmd()
+    return {"mcpServers": {"super-menu": {"command": command, "args": args}}}
 
 
 def build_command(message: str, session_id: str, config_path: str) -> list[str]:

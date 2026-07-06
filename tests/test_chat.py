@@ -16,11 +16,14 @@ from super_menu.web import chat
 from super_menu.plugins.route_avoider import plugin as ra
 
 
-def test_mcp_config_runs_this_interpreter():
-    cfg = chat.mcp_config()
-    server = cfg["mcpServers"]["super-menu"]
-    assert server["args"] == ["-m", "super_menu.cli", "mcp"]
-    assert server["command"]  # sys.executable
+def test_mcp_config_launches_super_menu_mcp():
+    # Two valid launch shapes: this interpreter directly, or `uv run --extra mcp`
+    # when the current env lacks the optional dep. Both must end up running the
+    # super-menu MCP server.
+    server = chat.mcp_config()["mcpServers"]["super-menu"]
+    assert server["command"]
+    assert server["args"][-1] == "mcp"
+    assert "super_menu.cli" in server["args"]
 
 
 def test_build_command_flags():
@@ -129,7 +132,7 @@ def test_non_auth_error_passes_through():
 
 
 if __name__ == "__main__":
-    test_mcp_config_runs_this_interpreter()
+    test_mcp_config_launches_super_menu_mcp()
     test_build_command_flags()
     test_translate_assistant_text()
     test_translate_tool_use()
