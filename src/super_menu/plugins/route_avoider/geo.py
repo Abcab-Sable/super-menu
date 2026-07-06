@@ -169,6 +169,11 @@ def _parse_radius(text: str, token: str) -> float:
         radius = float(text.strip())
     except ValueError as exc:
         raise ValueError(f"avoid zone '{token}' has a non-numeric radius") from exc
+    # NaN/inf slip past the range checks below (every comparison with NaN is
+    # False), producing [NaN, NaN] ring vertices that break JSON serialization —
+    # reject them up front so `data` stays a valid JSON payload across surfaces.
+    if not math.isfinite(radius):
+        raise ValueError(f"avoid zone '{token}' has a non-finite radius")
     if radius <= 0:
         raise ValueError(f"avoid zone '{token}' needs a radius greater than 0 km")
     if radius > MAX_RADIUS_KM:

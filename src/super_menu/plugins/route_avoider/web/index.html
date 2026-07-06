@@ -325,7 +325,7 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
 let mode = 'origin';
 let origin = null, destination = null;
 let originMarker = null, destMarker = null;
-let routeCasing = null, routeCore = null, routeFlow = null;
+let routeCasing = null, routeCore = null, routeFlow = null, routeGhost = null;
 const zones = [];   // { id, lat, lng, radius_km, circle }
 let zoneSeq = 0;
 
@@ -469,25 +469,34 @@ async function route() {
 }
 
 function clearRoute() {
-  [routeCasing, routeCore, routeFlow].forEach(l => l && map.removeLayer(l));
-  routeCasing = routeCore = routeFlow = null;
+  [routeGhost, routeCasing, routeCore, routeFlow].forEach(l => l && map.removeLayer(l));
+  routeGhost = routeCasing = routeCore = routeFlow = null;
 }
 
 function drawRoute(geojson) {
   clearRoute();
-  const line = { filter: f => f.geometry.type === 'LineString' };
+  // Since the trust-pack baseline, a constrained result carries two LineStrings:
+  // the real `route` and the unconstrained `baseline` ghost. Keep the ghost out
+  // of the glowing route styles and draw it first as its own faint dashed line,
+  // mirroring the command deck's tactical map.
+  const isBase = f => (f.properties || {}).kind === 'baseline';
+  const line = { filter: f => f.geometry.type === 'LineString' && !isBase(f) };
+  routeGhost = L.geoJSON(geojson, { filter: f => f.geometry.type === 'LineString' && isBase(f),
+    style: { color: '#5f7d95', weight: 3, dashArray: '8 8', opacity: .6 } }).addTo(map);
   routeCasing = L.geoJSON(geojson, { ...line, style: { color: '#0b0e14', weight: 9, opacity: .8 } }).addTo(map);
   routeCore = L.geoJSON(geojson, { ...line, className: 'route-glow',
     style: { color: '#38bdf8', weight: 4.5, opacity: .95, className: 'route-glow' } }).addTo(map);
   routeFlow = L.geoJSON(geojson, { ...line,
     style: { color: '#e0f2fe', weight: 4.5, opacity: .9, className: 'route-flow' } }).addTo(map);
   const b = routeCore.getBounds();
+  const g = routeGhost.getBounds();
+  if (g.isValid()) b.extend(g);   // frame both the route and its ghost baseline
   if (b.isValid()) map.flyToBounds(b, {
     paddingTopLeft: [innerWidth > 560 ? 380 : 24, 24], paddingBottomRight: [24, 24], duration: .9 });
 }
 
 function showResult(g) {
-  const h = Math.floor(g.duration_min / 60), m = Math.round(g.duration_min % 60);
+  const total = Math.round(g.duration_min), h = Math.floor(total / 60), m = total % 60;
   $('r-dist').innerHTML = `${g.distance_km}<small>km</small>`;
   $('r-time').innerHTML = h ? `${h}<small>h</small> ${m}<small>min</small>` : `${m}<small>min</small>`;
   $('r-zones').textContent = g.avoid_zones_applied + ($('motorways').checked ? ' + motorways' : '');
