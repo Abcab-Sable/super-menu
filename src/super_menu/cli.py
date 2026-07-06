@@ -184,10 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if head == "web":
         from super_menu.web.server import run as run_web
-        port = 8765
-        for tok in argv[1:]:
-            if tok.startswith("--port"):
-                port = int(tok.split("=", 1)[1]) if "=" in tok else port
+        params, _ = _parse_flags(argv[1:])  # accepts --port 8080 and --port=8080
+        try:
+            port = int(params.get("port", 8765))
+        except (TypeError, ValueError):
+            print(f"invalid --port {params.get('port')!r}; using 8765", file=sys.stderr)
+            port = 8765
         run_web(port=port)
         return 0
     if head == "list":

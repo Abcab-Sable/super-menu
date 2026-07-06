@@ -39,11 +39,15 @@ def handle_route(payload: dict) -> dict:
         return f"{p['lat']},{p['lng']}"
 
     zones = payload.get("avoid_zones") or []
-    avoid = ";".join(
-        f"{z['lat']},{z['lng']},{z.get('radius_km', 5)}"
-        + (f",{z['label']}" if z.get("label") else "")
-        for z in zones
-    )
+
+    def _spec(z: dict) -> str:
+        base = f"{z['lat']},{z['lng']},{z.get('radius_km', 5)}"
+        # A label rides in the last, ';'-delimited field of the avoid grammar, so
+        # strip ';' from it or a crafted label would inject an extra avoid zone.
+        label = str(z.get("label", "")).replace(";", " ").strip()
+        return f"{base},{label}" if label else base
+
+    avoid = ";".join(_spec(z) for z in zones)
     result = cmd_route(
         origin=_pt(origin),
         destination=_pt(dest),

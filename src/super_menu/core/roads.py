@@ -60,6 +60,7 @@ _ROUND = 5           # cache-file coordinate precision (1e-5° ≈ 1 m)
 _MAX_WAYS = 60000    # Overpass reply cap — a braille canvas can't show more anyway
 _FAIL_TTL = 120.0    # seconds to back off after a failed fetch
 _MEMO_CAP = 32
+_FAIL_CAP = 256      # bound the negative cache over a long panning session
 
 FetchFn = Callable[[tuple[float, float, float, float], tuple[str, ...]], list]
 
@@ -135,7 +136,7 @@ def roads_for_view(view: tuple[float, float, float, float], *,
         lines = (fetch or _fetch_overpass)(bbox, classes)
         lines = decimate(lines, max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / _DECIMATE)
     except Exception:
-        _failures[key] = time.monotonic()
+        _record_failure(key)
         return []
     if lines:                                  # an empty reply is suspect (rate limit,
         try:                                   # truncation) — memoize it, never persist it
@@ -214,3 +215,14 @@ def _remember(key: str, lines: list) -> None:
     if len(_memo) >= _MEMO_CAP:
         _memo.pop(next(iter(_memo)))
     _memo[key] = lines
+
+
+def _record_failure(key: str) -> None:
+    """Note a failed fetch for back-off, sweeping expired entries and capping the
+    dict so it can't grow without bound across a long session of failing pans."""
+    now = time.monotonic()
+    for stale in [k for k, t in _failures.items() if now - t >= _FAIL_TTL]:
+        del _failures[stale]
+    if len(_failures) >= _FAIL_CAP:
+        _failures.pop(next(iter(_failures)))
+    _failures[key] = now

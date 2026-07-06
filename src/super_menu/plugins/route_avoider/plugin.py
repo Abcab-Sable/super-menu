@@ -83,6 +83,15 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
     except ValueError as exc:
         return CommandResult.err(str(exc))
 
+    # Enforce the cap *before* geocoding: a named zone only needs counting, not
+    # resolving, so a 200-zone misuse is rejected without firing 200 live
+    # geocode round-trips first.
+    if len(specs) > MAX_ZONES:
+        return CommandResult.err(
+            f"{len(specs)} avoid zones exceeds the {MAX_ZONES}-zone cap — "
+            "merge or drop some"
+        )
+
     # 3. geocode any named zones ("Heathrow@10") through the same engine
     for s in specs:
         if not s.resolved:
@@ -91,12 +100,6 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
             except RoutingError as exc:
                 return CommandResult.err(f"avoid zone '{s.query}': {exc}")
             s.lat, s.lng = pt.lat, pt.lng
-
-    if len(specs) > MAX_ZONES:
-        return CommandResult.err(
-            f"{len(specs)} avoid zones exceeds the {MAX_ZONES}-zone cap — "
-            "merge or drop some"
-        )
 
     rings = geo.specs_to_rings(specs)
 
@@ -117,9 +120,10 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
     # baseline so the user can see the counterfactual (a ghost line on the map)
     # and what the avoidance cost them. Best-effort — a baseline failure never
     # fails the route (self-hosted Valhalla answers this in ~100 ms; the stub is
-    # instant; only a flaky hosted engine would ever skip it).
+    # instant). Skipped on a metered engine (hosted ORS), where the extra request
+    # would double the route's cost against a rate-limited quota.
     baseline = None
-    if rings or apply_motorways:
+    if (rings or apply_motorways) and not engine.metered:
         try:
             baseline = engine.route(o, d, avoid_rings=[], avoid_motorways=False,
                                     profile=profile)

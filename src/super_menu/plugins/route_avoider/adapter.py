@@ -92,6 +92,8 @@ class RoutingAdapter(ABC):
 
     name: str = "abstract"
     live: bool = False  # True for a real router, False for the offline estimator
+    metered: bool = False  # True for a rate-limited/paid hosted engine, where an
+                           # extra request (e.g. the trust-pack baseline) costs quota
 
     @abstractmethod
     def geocode(self, query: str) -> GeoPoint:
@@ -111,6 +113,7 @@ class RoutingAdapter(ABC):
 class ORSAdapter(RoutingAdapter):
     name = "openrouteservice"
     live = True
+    metered = True  # hosted free tier is rate-limited (~40/min, ~2000/day)
 
     def __init__(self, api_key: str, base_url: str = DEFAULT_ORS_BASE,
                  timeout: float = 30.0):
