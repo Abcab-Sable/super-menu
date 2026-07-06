@@ -85,6 +85,49 @@ def test_translate_unknown_event_is_empty():
     assert chat.translate_event({"type": "system", "subtype": "init"}) == []
 
 
+def test_child_env_strips_api_credentials():
+    env = chat._child_env()
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"):
+        assert k not in env
+
+
+def _without_oauth_token(fn):
+    """Run ``fn`` with CLAUDE_CODE_OAUTH_TOKEN removed, restoring it after."""
+    saved = os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    try:
+        fn()
+    finally:
+        if saved is not None:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = saved
+
+
+def test_auth_error_becomes_setup_hint():
+    def check():
+        ev = chat._maybe_auth_hint({"type": "error", "message": "API Error: 401 Invalid auth"})
+        assert "setup-token" in ev["message"]
+    _without_oauth_token(check)
+
+
+def test_auth_error_kept_when_token_configured():
+    saved = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-xxx"
+    try:
+        original = {"type": "error", "message": "API Error: 401 Invalid auth"}
+        assert chat._maybe_auth_hint(original) == original
+    finally:
+        if saved is None:
+            os.environ.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        else:
+            os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = saved
+
+
+def test_non_auth_error_passes_through():
+    def check():
+        original = {"type": "error", "message": "no route found"}
+        assert chat._maybe_auth_hint(original) == original
+    _without_oauth_token(check)
+
+
 if __name__ == "__main__":
     test_mcp_config_runs_this_interpreter()
     test_build_command_flags()
@@ -95,4 +138,8 @@ if __name__ == "__main__":
     test_translate_tool_result_string_content()
     test_translate_non_geojson_tool_result_ignored()
     test_translate_unknown_event_is_empty()
+    test_child_env_strips_api_credentials()
+    test_auth_error_becomes_setup_hint()
+    test_auth_error_kept_when_token_configured()
+    test_non_auth_error_passes_through()
     print("all chat tests passed")

@@ -29,11 +29,36 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
-# Strip any ambient API-key credentials from the child so ``claude`` authenticates
-# with the user's logged-in Claude subscription (OAuth) rather than falling into
-# per-token API billing — the whole point of this harness. ``ANTHROPIC_BASE_URL``
-# is deliberately left intact so enterprise/proxy setups keep working.
-_STRIP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Strip ambient API-key / endpoint overrides from the child so ``claude`` uses the
+# user's Claude subscription (OAuth) rather than per-token API billing or a parent
+# process's proxy. ``ANTHROPIC_BASE_URL`` is included because an inherited proxy URL
+# (e.g. from a Claude Code SDK/desktop host) sends the request somewhere the child's
+# subscription token isn't valid → 401. Subscription auth comes from a long-lived
+# token in ``CLAUDE_CODE_OAUTH_TOKEN`` (run ``claude setup-token`` once), which is
+# NOT stripped and so passes through to the child.
+_STRIP_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
+
+# Shown when Claude fails to authenticate and no headless token is configured.
+_AUTH_HINT = (
+    "Claude couldn't authenticate. To drive Claude Code on your subscription, run "
+    "`claude setup-token` once, then set CLAUDE_CODE_OAUTH_TOKEN (in your shell or "
+    "super-menu's .env) before starting `super-menu web`."
+)
+
+
+def _looks_like_auth_error(message: str) -> bool:
+    m = (message or "").lower()
+    return "401" in m or "authenticate" in m or "authentication" in m
+
+
+def _maybe_auth_hint(event: dict) -> dict:
+    """Rewrite a raw auth failure into an actionable setup hint (unless a headless
+    token is already configured, in which case surface the real error)."""
+    if (event.get("type") == "error"
+            and _looks_like_auth_error(event.get("message", ""))
+            and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")):
+        return {"type": "error", "message": _AUTH_HINT}
+    return event
 
 # Allowlist the whole super-menu MCP server so a headless run never blocks on an
 # interactive permission prompt (there is no UI to answer one). Safe: every
@@ -205,6 +230,7 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
             text=True, encoding="utf-8", errors="replace",
         )
         assert proc.stdout is not None
+        emitted_error = False
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -214,9 +240,13 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
             except ValueError:
                 continue  # non-JSON chatter (shouldn't happen with stream-json)
             for event in translate_event(obj):
+                event = _maybe_auth_hint(event)
+                emitted_error = emitted_error or event.get("type") == "error"
                 yield event
         code = proc.wait()
-        if code != 0:
+        # Only surface a generic non-zero-exit error if the stream didn't already
+        # report a specific one (e.g. the auth failure), to avoid overwriting it.
+        if code != 0 and not emitted_error:
             err = (proc.stderr.read() if proc.stderr else "").strip()
             yield {"type": "error",
                    "message": err.splitlines()[-1] if err else f"claude exited {code}"}
