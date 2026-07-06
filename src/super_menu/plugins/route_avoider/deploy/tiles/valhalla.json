@@ -1,0 +1,5 @@
+{
+  "service_limits": {
+    "max_exclude_polygons_length": 1000000000
+  }
+}

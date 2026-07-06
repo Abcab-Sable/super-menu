@@ -36,26 +36,33 @@ fallback.
 
 ## Change the region
 Edit `tile_urls` in `docker-compose.yml` to any extract from
-<https://download.geofabrik.de> (a country, sub-region, or a whole continent), then:
+<https://download.geofabrik.de> (a country, sub-region, or a whole continent), then
+set `force_rebuild=True` for one run so the new region's tiles are built:
 ```bash
-docker compose down
-rm -rf ./tiles                        # drop the old region's tiles
-# set force_rebuild=True for one run, or just let the fresh volume rebuild
-docker compose up -d
+docker compose up -d --force-recreate   # rebuilds tiles for the new region
 ```
+Flip `force_rebuild` back to `False` afterwards. Don't `rm -rf ./tiles` — that would
+delete the tracked `valhalla.json` seed (see below); `force_rebuild` rebuilds the
+tiles in place and the container re-merges the seed, so the avoid-zone limit sticks.
 
-## Raise the avoid-zone size limit (do this once)
-Valhalla's default config caps `exclude_polygons` at a **10 km circumference** —
-that's only a ~1.6 km-radius circle, so real avoid zones get rejected with
-"Exceeded maximum circumference for exclude_polygons". After the first build,
-raise the limit in the generated config and restart:
-```bash
-# in ./tiles/valhalla.json set:  "service_limits": { "max_exclude_polygons_length": 1000000, ... }
-docker compose up -d --force-recreate
-```
-1,000,000 m allows ~160 km-radius zones; the plugin's own 40-zone cap bounds abuse.
-The container keeps an existing `valhalla.json` (it only fills in missing keys), so
-the edit survives restarts.
+## Avoid-zone size limit — already handled
+Valhalla's stock config caps `exclude_polygons` at a **10 km circumference**, and the
+cap is on the *summed* perimeter of **every** avoid zone in a request — not per zone.
+A ~1.6 km-radius circle already fills 10 km, so any real avoid set is rejected with
+"Exceeded maximum circumference for exclude_polygons". (The obvious "raise it to
+1,000,000 m" is a trap: that's ~1,000 km of *total* perimeter — only a single
+~160 km-radius zone's worth — still well under what a handful of zones sum to.)
+
+So this deploy just removes the ceiling. The tracked `tiles/valhalla.json` is a
+one-key seed setting `service_limits.max_exclude_polygons_length` to
+**1,000,000,000 m**; the container deep-merges it into the freshly generated config
+on first build (`update_existing_config=True` backfills every other key, so nothing
+else is pinned). That's ~8× the plugin's own hard maximum — 40 zones × 500 km radius
+≈ 1.26×10⁸ m of perimeter — so under the plugin's `MAX_ZONES` / `MAX_RADIUS_KM` caps
+you *can't* reach the limit. There is nothing to configure.
+
+Pointing super-menu at a **different** Valhalla whose `valhalla.json` lacks this key is
+the only way to still hit the wall; set `max_exclude_polygons_length` there and restart.
 
 ## Resource guide
 | Coverage | Disk | RAM to build/run | Where |

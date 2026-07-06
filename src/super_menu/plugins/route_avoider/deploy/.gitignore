@@ -1,2 +1,7 @@
-# Built Valhalla routing tiles + downloaded OSM extracts (large, regenerable).
-tiles/
+# Valhalla's custom_files mount: the built routing tiles, the downloaded OSM extract,
+# the .tar, and the admin/timezone DBs are all large and regenerable — keep them out
+# of git. The one tracked exception is valhalla.json, a seed config the container
+# deep-merges on first build (update_existing_config=True) to pre-raise
+# max_exclude_polygons_length, so avoid zones route without hand-editing service limits.
+tiles/*
+!tiles/valhalla.json

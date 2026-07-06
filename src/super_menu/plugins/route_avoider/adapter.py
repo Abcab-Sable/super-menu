@@ -417,13 +417,15 @@ class ValhallaAdapter(RoutingAdapter):
                 "no_route",
                 "avoid zones may seal off an endpoint — reduce a radius or remove a zone")
         message = info.get("error") or ""
-        # Stock Valhalla configs cap exclude_polygons at a 10 km circumference —
-        # a ~1.6 km-radius circle — so real avoid zones need a one-time server
-        # config bump. Point at the fix rather than parroting the limit.
+        # Stock Valhalla caps exclude_polygons at a 10 km *summed* circumference, so
+        # real avoid sets get rejected. super-menu's own deploy ships a valhalla.json
+        # that lifts this ceiling above anything the plugin's zone caps can produce —
+        # hitting it means this server is a stock/other config without that seed.
         if "circumference" in message and "exclude_polygons" in message:
             return RoutingError(
-                f"{message} — raise service_limits.max_exclude_polygons_length in "
-                "the server's valhalla.json (see the plugin's deploy/README.md)")
+                f"{message} — this Valhalla's service_limits.max_exclude_polygons_length "
+                "is too low; super-menu's own deploy/ ships a config that removes this "
+                "limit (see the plugin's deploy/README.md)")
         return RoutingError(message or f"Valhalla error (HTTP {exc.code})")
 
 
