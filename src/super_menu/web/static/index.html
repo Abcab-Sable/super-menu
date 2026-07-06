@@ -81,9 +81,24 @@
 
   /* ---- modules rail ---- */
   #rail { grid-area: rail; min-height: 0; }
-  #rail .in { padding: 16px 12px; overflow-y: auto; }
+  #rail .in { padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; }
   .rail-label, .sect { font-family: var(--mono); font-size: 9.5px; color: var(--muted);
     letter-spacing: .28em; margin: 4px 6px 10px; }
+  .rail-top { display: flex; align-items: center; }
+  .rail-top .rail-label { margin: 0 0 0 6px; flex: 1; }
+  #rail-tgl { all: unset; cursor: pointer; color: var(--muted); font-family: var(--mono);
+    font-size: 12px; padding: 2px 8px; margin-bottom: 8px; border: 1px solid transparent; }
+  #rail-tgl:hover { color: var(--cyan); border-color: var(--cyan-dim); }
+  /* collapsed rail — icon strip; main console takes the width */
+  #app.rail-min { grid-template-columns: 62px 1fr; }
+  #app.rail-min #rail .in { padding: 12px 8px; align-items: center; }
+  #app.rail-min .rail-label { display: none; }
+  #app.rail-min .rail-top { justify-content: center; }
+  #app.rail-min .mod { padding: 11px 0; width: 44px; text-align: center; }
+  #app.rail-min .mod .t { justify-content: center; }
+  #app.rail-min .mod .t .ic { font-size: 19px; }
+  #app.rail-min .mod .t .nm, #app.rail-min .mod .t .n, #app.rail-min .mod .d { display: none; }
+  #app.rail-min .mod.active::before { top: 6px; bottom: 6px; }
   .mod { position: relative; padding: 12px 12px 12px 16px; margin-bottom: 8px; cursor: pointer;
     border: 1px solid transparent; transition: .16s;
     clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
@@ -185,6 +200,24 @@
   ul.hud { list-style: none; margin: 0; padding: 0; }
   ul.hud li { padding: 5px 0 5px 18px; position: relative; border-bottom: 1px solid rgba(56,225,255,.05); }
   ul.hud li::before { content: '▸'; position: absolute; left: 2px; color: var(--cyan); }
+
+  /* ---- home quick-launch (shown before any module is picked) ---- */
+  .home { height: 100%; display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+  .home .hint { font-family: var(--mono); font-size: 10px; color: var(--muted);
+    letter-spacing: .14em; }
+  .ql-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px; align-content: start; overflow-y: auto; }
+  .ql { all: unset; display: flex; gap: 11px; align-items: flex-start; padding: 12px 14px;
+    cursor: pointer; border: 1px solid var(--cyan-dim); background: rgba(56,225,255,.03);
+    transition: .15s;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+  .ql:hover { background: var(--cyan-soft); border-color: rgba(56,225,255,.4);
+    box-shadow: 0 0 14px rgba(56,225,255,.12); }
+  .ql .ic { font-size: 17px; line-height: 1.2; flex: none; }
+  .ql b { display: block; font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+    color: var(--cyan); letter-spacing: .04em; }
+  .ql i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted);
+    line-height: 1.4; margin-top: 3px; font-family: var(--disp); letter-spacing: .02em; }
 
   pre.hud { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
   .j-k { color: var(--cyan); } .j-s { color: #b6f0c8; } .j-n { color: var(--amber); }
@@ -345,11 +378,15 @@
   #boot-log .ok { color: var(--ok); }
 
   @media (max-width: 900px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 30px;
+    #app, #app.rail-min { grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 30px;
       grid-template-areas: 'top' 'rail' 'main' 'foot'; }
-    #rail .in { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
-    .mod { min-width: 190px; margin: 0; }
-    .rail-label { display: none; }
+    #rail .in, #app.rail-min #rail .in { flex-direction: row; gap: 8px; overflow-x: auto;
+      padding: 10px; align-items: stretch; }
+    .mod, #app.rail-min .mod { min-width: 190px; width: auto; margin: 0; text-align: left;
+      padding: 12px 12px 12px 16px; }
+    #app.rail-min .mod .t { justify-content: flex-start; }
+    #app.rail-min .mod .t .nm, #app.rail-min .mod .t .n, #app.rail-min .mod .d { display: revert; }
+    .rail-label, .rail-top { display: none; }
     html, body { overflow: auto; }
   }
 </style>
@@ -374,7 +411,10 @@
   </div></div>
 
   <div id="rail" class="frame"><div class="in">
-    <div class="rail-label">// MODULES</div>
+    <div class="rail-top">
+      <span class="rail-label">// MODULES</span>
+      <button id="rail-tgl" title="collapse modules (Ctrl+B)">⟨⟨</button>
+    </div>
     <div id="mods"></div>
   </div></div>
 
@@ -401,6 +441,7 @@
   <div id="foot">
     <span>SUPER-MENU // LOCAL INSTANCE</span><span class="bar"></span>
     <span><kbd>Ctrl</kbd>+<kbd>K</kbd> COMMAND PALETTE</span>
+    <span><kbd>Ctrl</kbd>+<kbd>B</kbd> MODULES</span>
   </div>
 </div>
 
@@ -471,12 +512,45 @@ function initUI() {
     const el = document.createElement('div');
     el.className = 'mod';
     el.dataset.id = p.id;
-    el.innerHTML = `<div class="t"><span class="ic">${p.icon}</span>${esc(p.name).toUpperCase()}
+    el.title = `${p.name} — ${p.description}`;
+    el.innerHTML = `<div class="t"><span class="ic">${p.icon}</span><span class="nm">${esc(p.name).toUpperCase()}</span>
         <span class="n">${p.commands.length} CMD</span></div>
       <div class="d">${esc(p.description)}</div>`;
     el.onclick = () => selectPlugin(p.id);
     mods.appendChild(el);
   }
+  renderHome();
+}
+
+/* rail collapse — icons only, main console gets the width */
+function setRailMin(min) {
+  document.getElementById('app').classList.toggle('rail-min', min);
+  $('rail-tgl').textContent = min ? '⟩⟩' : '⟨⟨';
+  $('rail-tgl').title = (min ? 'expand' : 'collapse') + ' modules (Ctrl+B)';
+  try { localStorage.setItem('sm-rail-min', min ? '1' : ''); } catch (e) {}
+  // Leaflet needs a nudge when its container is resized by the grid change
+  setTimeout(() => tac.map?.invalidateSize(), 60);
+}
+$('rail-tgl').onclick = () => setRailMin(!document.getElementById('app').classList.contains('rail-min'));
+try { if (localStorage.getItem('sm-rail-min')) setRailMin(true); } catch (e) {}
+
+/* home screen — every command one click away instead of an empty placeholder */
+function renderHome() {
+  const cards = [];
+  for (const p of state.menu.plugins)
+    for (const c of p.commands)
+      cards.push({ p, c });
+  $('out-body').innerHTML = `<div class="home">
+    <div class="hint">// QUICK LAUNCH — PICK A COMMAND, OR PRESS CTRL+K</div>
+    <div class="ql-grid">${cards.map(({ p, c }, i) => `
+      <button class="ql" data-n="${i}">
+        <span class="ic">${p.icon}</span>
+        <span><b>${esc(p.id)} › ${esc(c.name)}</b><i>${esc(c.help)}</i></span>
+      </button>`).join('')}</div></div>`;
+  $('out-body').querySelectorAll('.ql').forEach(el => {
+    const { p, c } = cards[+el.dataset.n];
+    el.onclick = () => selectPlugin(p.id, c.name);
+  });
 }
 
 function selectPlugin(id, cmdName) {
@@ -1092,6 +1166,8 @@ function palOpen() { pal.classList.add('open'); palQ.value = ''; palSel = 0; pal
 function palClose() { pal.classList.remove('open'); }
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palOpen(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault();
+    setRailMin(!document.getElementById('app').classList.contains('rail-min')); }
   else if (e.key === 'Escape') palClose();
   else if (pal.classList.contains('open')) {
     const items = palItems(palQ.value);
