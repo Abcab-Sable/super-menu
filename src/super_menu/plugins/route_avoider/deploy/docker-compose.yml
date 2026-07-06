@@ -13,13 +13,20 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./tiles:/custom_files          # built tiles persist here (reused on restart)
+      # Built tiles persist here (reused on restart). This dir is also Valhalla's
+      # custom_files, so the tracked ./tiles/valhalla.json seed lands in it — see
+      # update_existing_config below.
+      - ./tiles:/custom_files
     environment:
       # Great Britain (~1.5 GB). Swap for ANY extract from https://download.geofabrik.de
       # e.g. .../europe/germany-latest.osm.pbf — bigger regions need more RAM/disk.
       - tile_urls=https://download.geofabrik.de/europe/great-britain-latest.osm.pbf
       - use_tiles_ignore_pbf=True       # reuse built tiles instead of re-reading the pbf
       - force_rebuild=False             # set True once to rebuild after changing the region
+      # Deep-merge our seed valhalla.json (only max_exclude_polygons_length) into the
+      # generated config, filling every other key. This is what lifts the avoid-zone
+      # ceiling with zero hand-editing; leave it True. (README → "Avoid-zone size limit".)
+      - update_existing_config=True
       - server_threads=4
       - build_elevation=False
       - build_admins=True
