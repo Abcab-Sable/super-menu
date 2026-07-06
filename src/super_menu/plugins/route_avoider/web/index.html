@@ -220,10 +220,65 @@
   @keyframes flow { to { stroke-dashoffset: -15; } }
   .pin { filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .5)); }
 
+  /* ---------- chat pane (Claude Code, right side) ---------- */
+  #chat {
+    position: absolute; z-index: 1000; top: 16px; right: 16px; width: 344px;
+    max-height: calc(100% - 32px); display: none; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); backdrop-filter: blur(18px) saturate(1.3); overflow: hidden;
+    animation: slideInRight .45s cubic-bezier(.2, .9, .3, 1) both;
+  }
+  #chat.on { display: flex; }
+  @keyframes slideInRight { from { opacity: 0; transform: translateX(24px); } }
+  .chat-head { display: flex; align-items: center; gap: 10px; padding: 15px 16px 13px;
+    border-bottom: 1px solid var(--line); }
+  .chat-head .mark { width: 30px; height: 30px; border-radius: 9px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: grid; place-items: center; font-size: 15px; }
+  .chat-head h2 { margin: 0; font-size: 14px; font-weight: 800; letter-spacing: -.01em; }
+  .chat-head .tag { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  #chat-min { margin-left: auto; all: unset; cursor: pointer; color: var(--muted);
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    font-size: 16px; border: 1px solid var(--line); transition: .15s; }
+  #chat-min:hover { color: var(--fg); border-color: var(--line-strong); }
+  #chat-msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column;
+    gap: 10px; min-height: 140px; }
+  #chat-msgs::-webkit-scrollbar { width: 8px; }
+  #chat-msgs::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+  .chat-empty { margin: auto; padding: 14px; text-align: center; color: var(--muted);
+    font-size: 12px; line-height: 1.6; }
+  .chat-empty b { color: var(--fg); font-weight: 600; }
+  .bubble { font-size: 12.5px; line-height: 1.55; padding: 9px 12px; border-radius: 12px;
+    max-width: 88%; white-space: pre-wrap; overflow-wrap: anywhere; animation: chipIn .2s ease-out both; }
+  .bubble.user { align-self: flex-end; color: var(--fg);
+    background: linear-gradient(135deg, rgba(94, 177, 255, .22), rgba(124, 108, 255, .22));
+    border: 1px solid rgba(94, 177, 255, .3); }
+  .bubble.assistant { align-self: flex-start; color: var(--fg);
+    background: rgba(255, 255, 255, .05); border: 1px solid var(--line); }
+  .bubble.thinking { color: var(--muted); font-style: italic; }
+  .chat-input { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--line); }
+  #chat-input { flex: 1; resize: none; height: 40px; max-height: 130px; padding: 10px 12px;
+    font: inherit; font-size: 12.5px; color: var(--fg); background: rgba(255, 255, 255, .05);
+    border: 1px solid var(--line); border-radius: 10px; }
+  #chat-input:focus { outline: none; border-color: var(--accent); background: rgba(94, 177, 255, .06); }
+  #chat-send { width: 42px; flex: none; border: none; border-radius: 10px; cursor: pointer;
+    color: #fff; font-size: 16px; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 4px 14px rgba(94, 177, 255, .3); transition: .15s; }
+  #chat-send:hover:not(:disabled) { filter: brightness(1.12); }
+  #chat-send:disabled { opacity: .5; cursor: wait; }
+  #chat-fab { position: absolute; z-index: 1000; top: 16px; right: 16px; display: none;
+    align-items: center; gap: 8px; padding: 11px 16px; border: none; border-radius: 999px;
+    cursor: pointer; color: #fff; font: inherit; font-size: 13px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: var(--shadow);
+    transition: .15s; }
+  #chat-fab.on { display: inline-flex; }
+  #chat-fab:hover { transform: translateY(-1px); filter: brightness(1.1); }
+
   @media (max-width: 560px) {
     #panel { top: auto; bottom: 0; left: 0; width: 100%; max-height: 62%;
       border-radius: var(--radius) var(--radius) 0 0; animation-name: sheetIn; }
     @keyframes sheetIn { from { opacity: 0; transform: translateY(30px); } }
+    #chat { left: 0; right: 0; width: 100%; top: 8px; max-height: 46%; margin: 0 auto; }
   }
 </style>
 </head>
@@ -308,6 +363,26 @@
   </details>
 </div>
 
+<button id="chat-fab" title="Ask Claude">💬 Ask Claude</button>
+<div id="chat">
+  <div class="chat-head">
+    <div class="mark">✦</div>
+    <div>
+      <h2>Ask Claude</h2>
+      <div class="tag">plan a route in plain language</div>
+    </div>
+    <button id="chat-min" title="Hide">–</button>
+  </div>
+  <div id="chat-msgs">
+    <div class="chat-empty">Try <b>“route from Manchester to Leeds avoiding Bolton”</b> —
+      Claude plans it through the router and draws it on the map for you to fine-tune.</div>
+  </div>
+  <div class="chat-input">
+    <textarea id="chat-input" rows="1" placeholder="Ask for a route…" autocomplete="off"></textarea>
+    <button id="chat-send" title="Send">➤</button>
+  </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script>
@@ -354,8 +429,8 @@ function setDestination(latlng, label) {
 }
 
 /* ---------- avoid zones ---------- */
-function addZone(latlng) {
-  const radius_km = +$('radius').value;
+function addZone(latlng, radius_km) {
+  radius_km = radius_km ?? +$('radius').value;
   const circle = L.circle(latlng, {
     radius: radius_km * 1000, color: '#f59e0b', weight: 2, dashArray: '6 6',
     fillColor: '#f59e0b', fillOpacity: .12,
@@ -537,7 +612,103 @@ function setEngineBadge(s) {
   $('engine-label').textContent = s.live ? s.engine : 'estimate';
   el.title = s.live ? 'Live road routing' : 'Offline straight-line estimate — connect an engine';
 }
-fetch('/api/status').then(r => r.json()).then(setEngineBadge).catch(() => {});
+fetch('/api/status').then(r => r.json()).then(s => {
+  setEngineBadge(s);
+  if (s.chat) $('chat').classList.add('on');   // pane only when the claude CLI is present
+}).catch(() => {});
+
+/* ---------- chat: Claude Code as a 4th driver ---------- */
+let chatSession = null, chatBusy = false;
+
+function chatBubble(role, text) {
+  $('chat-msgs').querySelector('.chat-empty')?.remove();
+  const b = document.createElement('div');
+  b.className = 'bubble ' + role;
+  b.textContent = text;
+  $('chat-msgs').appendChild(b);
+  $('chat-msgs').scrollTop = $('chat-msgs').scrollHeight;
+  return b;
+}
+
+/* Rebuild the left-panel start / destination / avoid zones from the route Claude
+   produced, so its plan becomes hand-editable exactly like a manual one. */
+function syncFromGeojson(g) {
+  [originMarker, destMarker, ...zones.map(z => z.circle)].forEach(l => l && map.removeLayer(l));
+  origin = destination = originMarker = destMarker = null;
+  zones.length = 0;
+  let pendingRadius = null;
+  for (const f of (g.features || [])) {
+    const p = f.properties || {}, geom = f.geometry || {}, c = geom.coordinates;
+    if (p.kind === 'origin' && geom.type === 'Point') setOrigin(L.latLng(c[1], c[0]), p.label);
+    else if (p.kind === 'destination' && geom.type === 'Point') setDestination(L.latLng(c[1], c[0]), p.label);
+    else if (p.kind === 'avoid' && geom.type === 'Polygon') pendingRadius = p.radius_km;
+    else if (p.kind === 'avoid' && geom.type === 'Point') {
+      addZone(L.latLng(c[1], c[0]), pendingRadius ?? undefined);
+      pendingRadius = null;
+    }
+  }
+  renderZoneChips();
+}
+
+async function sendChat() {
+  const input = $('chat-input');
+  const msg = input.value.trim();
+  if (!msg || chatBusy) return;
+  chatBubble('user', msg);
+  input.value = ''; input.style.height = '40px';
+  chatBusy = true; $('chat-send').disabled = true;
+  let assistant = null, text = '';
+  const paint = () => { if (assistant) { assistant.className = 'bubble assistant'; assistant.textContent = text; } };
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, session_id: chatSession }),
+    });
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i).split('\n').find(l => l.startsWith('data:'));
+        buf = buf.slice(i + 2);
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(5).trim());
+        if (ev.type === 'session') chatSession = ev.session_id;
+        else if (ev.type === 'tool') {
+          if (!assistant) assistant = chatBubble('assistant thinking', '🧭 planning route…');
+        } else if (ev.type === 'text') {
+          if (!assistant) assistant = chatBubble('assistant', '');
+          text += ev.text; paint();
+        } else if (ev.type === 'route' && ev.geojson) {
+          drawRoute(ev.geojson); showResult(ev.geojson); syncFromGeojson(ev.geojson);
+        } else if (ev.type === 'error') {
+          toast(ev.message || 'Claude reported an error');
+          if (assistant && !text) { assistant.className = 'bubble assistant'; assistant.textContent = '⚠︎ ' + (ev.message || 'error'); }
+        }
+        $('chat-msgs').scrollTop = $('chat-msgs').scrollHeight;
+      }
+    }
+  } catch (err) {
+    toast('Chat failed — is the server still running?');
+  } finally {
+    chatBusy = false; $('chat-send').disabled = false;
+    input.focus();
+  }
+}
+
+$('chat-send').onclick = sendChat;
+$('chat-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$('chat-input').addEventListener('input', e => {
+  e.target.style.height = '40px';
+  e.target.style.height = Math.min(e.target.scrollHeight, 130) + 'px';
+});
+$('chat-min').onclick = () => { $('chat').classList.remove('on'); $('chat-fab').classList.add('on'); };
+$('chat-fab').onclick = () => { $('chat-fab').classList.remove('on'); $('chat').classList.add('on'); $('chat-input').focus(); };
 
 let keyTimer = null;
 $('ors-key').addEventListener('input', e => {

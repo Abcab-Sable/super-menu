@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from super_menu.core.registry import default_registry
+from super_menu.web import chat
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -93,6 +94,23 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send(500, b"page missing", "text/plain")
 
+    def _send_sse(self, events) -> None:
+        """Stream front-end events as Server-Sent Events. ``ThreadingHTTPServer``
+        gives each request its own thread, so a long-lived stream just occupies
+        that thread until Claude's turn ends or the browser disconnects."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")  # disable proxy buffering
+        self.end_headers()
+        try:
+            for ev in events:
+                self.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                                 .encode("utf-8"))
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # browser navigated away mid-stream
+
     def do_GET(self) -> None:
         from super_menu.plugins.route_avoider import webserver as ra_web
 
@@ -104,7 +122,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/menu":
             self._send_json(menu_payload())
         elif parsed.path == "/api/status":
-            self._send_json(ra_web._status_payload())
+            self._send_json({**ra_web._status_payload(), "chat": chat.claude_available()})
         elif parsed.path == "/api/geocode":
             q = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
             self._send_json(ra_web.handle_geocode(q))
@@ -116,8 +134,16 @@ class _Handler(BaseHTTPRequestHandler):
         from super_menu.plugins.route_avoider.plugin import set_api_key
 
         length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) or b"{}"
+        if self.path == "/api/chat":
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = {}
+            self._send_sse(chat.stream_chat(body.get("message"), body.get("session_id")))
+            return
         try:
-            payload = json.loads(self.rfile.read(length) or b"{}")
+            payload = json.loads(raw)
             if self.path == "/api/run":
                 reply = handle_run(payload)
             elif self.path == "/api/route":
