@@ -47,6 +47,20 @@ _AUTH_HINT = (
 )
 
 
+def _debug_log(text: str) -> None:
+    """Append a line to a debug dump when SUPER_MENU_CHAT_DEBUG is set — used to
+    inspect the exact stream-json shapes Claude Code emits. Truncated so a full
+    road-trace tool result stays readable while still showing its structure."""
+    if not os.environ.get("SUPER_MENU_CHAT_DEBUG"):
+        return
+    try:
+        path = Path(tempfile.gettempdir()) / "super-menu-chat-debug.jsonl"
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(text[:4000] + "\n")
+    except OSError:
+        pass
+
+
 def _looks_like_auth_error(message: str) -> bool:
     m = (message or "").lower()
     return "401" in m or "authenticate" in m or "authentication" in m
@@ -67,12 +81,15 @@ def _maybe_auth_hint(event: dict) -> dict:
 _ALLOWED_TOOLS = "mcp__super-menu"
 
 _SYSTEM_PROMPT = (
-    "You are embedded in super-menu's route planner. The user is looking at a live "
-    "map. To plan or change a route, call the route tool (mcp__super-menu"
-    "__route_avoider__route) — the map renders whatever it returns. Do the routing "
-    "through the tool, never invent coordinates or distances yourself. Keep replies "
-    "short: confirm what you did and note any trade-off (extra time/distance) in a "
-    "sentence or two."
+    "You are embedded in super-menu's route planner, looking at a live map with the "
+    "user. Plan routes by calling the route tool (mcp__super-menu__route_avoider__route). "
+    "Pass `origin` and `destination` as 'lat,lng' coordinate strings — use your own "
+    "geographic knowledge of the places, because the routing engine does NOT geocode "
+    "names. Put each area to avoid in the `avoid` parameter as 'lat,lng,radius_km', "
+    "joining several with ';'. Call the tool once with your best coordinates. The map "
+    "renders the result automatically, so do NOT read files, run shell commands, or "
+    "otherwise inspect the tool's raw output. Then reply in 1-2 sentences: confirm the "
+    "route and note any trade-off (extra time/distance)."
 )
 
 
@@ -141,35 +158,53 @@ def _blocks(obj: dict) -> list[dict]:
     return content if isinstance(content, list) else []
 
 
-def _route_from_tool_result(block: dict) -> dict | None:
-    """If a ``tool_result`` block carries a ``kind="geojson"`` CommandResult, pull
-    out its FeatureCollection; otherwise ``None``.
+def route_tool_inputs(obj: dict) -> list[dict]:
+    """The ``input`` params of every ``route_avoider__route`` tool call in an
+    assistant message.
 
-    The block's content is exactly the ``json.dumps(payload)`` text the MCP server
-    returns (see ``mcp_server.call_tool``), so we parse it and read ``kind``/``data``.
+    We render the map from the tool *input* (which is small and always present in
+    the stream), not the tool *result*: a full road-trace GeoJSON is tens of
+    kilobytes and Claude Code offloads results over its token cap to a file, so the
+    geometry never comes back inline. Re-running the route from these params in the
+    web server is what actually draws the map. See :func:`run_route`.
     """
-    content = block.get("content")
-    # tool_result content may be a raw string or a list of {type:text,text:...}.
-    if isinstance(content, list):
-        content = "".join(
-            c.get("text", "") for c in content if isinstance(c, dict))
-    if not isinstance(content, str) or not content.strip():
-        return None
+    if obj.get("type") != "assistant":
+        return []
+    inputs = []
+    for block in _blocks(obj):
+        if (isinstance(block, dict) and block.get("type") == "tool_use"
+                and str(block.get("name", "")).endswith("route_avoider__route")):
+            inp = block.get("input")
+            if isinstance(inp, dict):
+                inputs.append(inp)
+    return inputs
+
+
+def run_route(params: dict) -> tuple[dict, str] | None:
+    """Execute the route-avoider ``route`` command in-process and return its
+    ``(geojson, summary)`` — or ``None`` if it isn't available or the call fails
+    (e.g. Claude passed place names instead of coordinates, which we simply skip)."""
     try:
-        payload = json.loads(content)
-    except (ValueError, TypeError):
+        from super_menu.core.registry import default_registry
+        plugin = default_registry().get("route-avoider")
+        command = plugin.command("route") if plugin else None
+        if command is None:
+            return None
+        result = command.run(params)
+        if result.ok and result.kind == "geojson" and result.data:
+            return result.data, result.summary
+    except Exception:  # a bad tool input must never break the chat stream
         return None
-    if isinstance(payload, dict) and payload.get("kind") == "geojson":
-        return payload
     return None
 
 
 def translate_event(obj: dict) -> list[dict]:
     """Map one decoded ``stream-json`` object to zero+ front-end events.
 
-    Pure and total: unknown/irrelevant events yield ``[]``. Front-end event types:
-    ``text`` (assistant prose), ``tool`` (a tool call started), ``route`` (a
-    geojson result to draw), ``done`` (turn finished), ``error``.
+    Pure and total: unknown/irrelevant events yield ``[]``. Front-end event types
+    here: ``text`` (assistant prose), ``tool`` (a tool call started), ``done``,
+    ``error``. ``route`` events are emitted separately by :func:`stream_chat` from
+    the tool input (see :func:`route_tool_inputs`), not from the model output.
     """
     etype = obj.get("type")
     events: list[dict] = []
@@ -182,17 +217,6 @@ def translate_event(obj: dict) -> list[dict]:
                 events.append({"type": "text", "text": block["text"]})
             elif block.get("type") == "tool_use":
                 events.append({"type": "tool", "name": block.get("name", "")})
-
-    elif etype == "user":
-        for block in _blocks(obj):
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                payload = _route_from_tool_result(block)
-                if payload is not None:
-                    events.append({
-                        "type": "route",
-                        "geojson": payload.get("data"),
-                        "summary": payload.get("summary", ""),
-                    })
 
     elif etype == "result":
         if obj.get("is_error") or obj.get("subtype") not in (None, "success"):
@@ -243,6 +267,7 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
             line = line.strip()
             if not line:
                 continue
+            _debug_log("RAW " + line)
             try:
                 obj = json.loads(line)
             except ValueError:
@@ -250,7 +275,16 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
             for event in translate_event(obj):
                 event = _maybe_auth_hint(event)
                 emitted_error = emitted_error or event.get("type") == "error"
+                _debug_log("EVT " + event.get("type", "?"))
                 yield event
+            # Draw the map from the tool *input* by re-running the route here — the
+            # tool result is too large to survive Claude's context (see run_route).
+            for params in route_tool_inputs(obj):
+                ran = run_route(params)
+                if ran is not None:
+                    geojson, summary = ran
+                    _debug_log("ROUTE re-run ok: " + summary)
+                    yield {"type": "route", "geojson": geojson, "summary": summary}
         code = proc.wait()
         # Only surface a generic non-zero-exit error if the stream didn't already
         # report a specific one (e.g. the auth failure), to avoid overwriting it.
