@@ -23,6 +23,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.reactive import reactive
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widget import Widget
@@ -38,10 +39,121 @@ from textual.widgets import (
 )
 from textual.widgets.tree import TreeNode
 
+from super_menu.core import braille, roads
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult, Param, Plugin
 
 FieldWidget = Union[Input, Checkbox, Select]
+
+
+class GeoMap(Widget):
+    """Interactive braille map of a ``kind="geojson"`` payload. Focus it to zoom
+    (``+``/``-``), pan (arrows), toggle route waypoints (``w``) and reset (``0``).
+    Generic — it knows nothing about routes, only GeoJSON."""
+
+    can_focus = True
+
+    BINDINGS = [
+        Binding("plus,equals_sign", "zoom(1.4)", "Zoom in"),
+        Binding("minus,underscore", "zoom(0.714)", "Zoom out"),
+        Binding("w", "toggle_waypoints", "Waypoints"),
+        Binding("0", "reset", "Reset view"),
+        Binding("up", "pan(0, -1)", "Pan", show=False),
+        Binding("down", "pan(0, 1)", "Pan", show=False),
+        Binding("left", "pan(-1, 0)", "Pan", show=False),
+        Binding("right", "pan(1, 0)", "Pan", show=False),
+    ]
+
+    zoom: reactive[float] = reactive(1.0)
+    show_waypoints: reactive[bool] = reactive(False)
+
+    def __init__(self, geojson: dict, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._geojson = geojson
+        self._bbox = braille.data_bbox(geojson)
+        self._cx, self._cy = self._center()
+        self._roads: list = []
+        self.border_title = "🗺  map"
+
+    def on_mount(self) -> None:
+        self._request_roads()
+
+    def _center(self) -> tuple[float, float]:
+        if not self._bbox:
+            return 0.0, 0.0
+        minlng, minlat, maxlng, maxlat = self._bbox
+        return (minlng + maxlng) / 2, (minlat + maxlat) / 2
+
+    def _view(self) -> Optional[tuple[float, float, float, float]]:
+        """Current zoom/pan window, or None to auto-frame the data."""
+        if not self._bbox or self.zoom <= 1.0:
+            return None
+        minlng, minlat, maxlng, maxlat = self._bbox
+        half_x = (maxlng - minlng) / self.zoom / 2
+        half_y = (maxlat - minlat) / self.zoom / 2
+        return (self._cx - half_x, self._cy - half_y,
+                self._cx + half_x, self._cy + half_y)
+
+    def render(self) -> Text:
+        w = self.size.width or 48
+        h = self.size.height or 16
+        wp = " · waypoints" if self.show_waypoints else ""
+        self.border_subtitle = f"{self.zoom:.1f}×  +/− · ↑↓←→ · w · 0{wp}"
+        return braille.render_geojson(self._geojson, w, h, view=self._view(),
+                                      waypoints=self.show_waypoints,
+                                      roads=self._roads)
+
+    def _request_roads(self) -> None:
+        """Fetch the OSM road underlay for the current view off the UI thread.
+
+        ``exclusive`` per group: a rapid zoom/pan burst keeps only the newest
+        fetch. Cache hits inside ``roads_for_view`` make repeats instant."""
+        frame = self._view() or self._bbox
+        if frame is None:
+            return
+        self.run_worker(partial(self._load_roads, frame), thread=True,
+                        exclusive=True, group="roads")
+
+    def _load_roads(self, frame: tuple[float, float, float, float]) -> None:
+        # never raises; [] on any failure. allow_slow: a worker can afford the
+        # ~minute a country-scale first fetch takes — it caches for everyone.
+        lines = roads.roads_for_view(frame, allow_slow=True)
+        if lines:
+            self._roads = lines
+            self.app.call_from_thread(self.refresh)
+
+    def watch_zoom(self) -> None:
+        self._request_roads()
+        self.refresh()
+
+    def watch_show_waypoints(self) -> None:
+        self.refresh()
+
+    def on_resize(self) -> None:
+        self.refresh()
+
+    def action_zoom(self, factor: float) -> None:
+        self.zoom = max(1.0, min(64.0, self.zoom * factor))
+        if self.zoom == 1.0:              # fully zoomed out ⇒ recentre on the data
+            self._cx, self._cy = self._center()
+
+    def action_pan(self, dx: int, dy: int) -> None:
+        if not self._bbox:
+            return
+        minlng, minlat, maxlng, maxlat = self._bbox
+        self._cx += dx * (maxlng - minlng) / self.zoom * 0.2
+        self._cy -= dy * (maxlat - minlat) / self.zoom * 0.2   # screen y grows downward
+        self._request_roads()
+        self.refresh()
+
+    def action_toggle_waypoints(self) -> None:
+        self.show_waypoints = not self.show_waypoints
+
+    def action_reset(self) -> None:
+        self._cx, self._cy = self._center()
+        self.show_waypoints = False
+        self.zoom = 1.0
+        self.refresh()
 
 # Curated Textual themes cycled with the ``t`` binding.
 THEMES = [
@@ -164,7 +276,7 @@ class SuperMenuApp(App):
     }
     #form {
         height: auto;
-        max-height: 60%;
+        max-height: 42%;
         margin-bottom: 1;
         padding: 0 2 1 2;
     }
@@ -232,6 +344,16 @@ class SuperMenuApp(App):
     .result-chip.-ok { color: $success; background: $success 15%; }
     .result-chip.-err { color: $error; background: $error 15%; }
     #result-summary { width: 1fr; margin-left: 1; }
+
+    GeoMap {
+        width: 1fr;
+        height: 1fr;
+        min-height: 12;
+        margin-top: 1;
+        padding: 0 1;
+        color: $accent;
+        border: round $primary 35%;
+    }
 
     #results DataTable {
         height: auto;
@@ -458,7 +580,10 @@ class SuperMenuApp(App):
         if p.choices:
             return Select(
                 [(c, c) for c in p.choices],
-                value=p.default if p.default is not None else Select.BLANK,
+                # Select.BLANK is a dead alias equal to False in current Textual;
+                # the real "no selection" sentinel is Select.NULL. Passing False
+                # crashes the widget on mount for any choices param without a default.
+                value=p.default if p.default is not None else Select.NULL,
                 allow_blank=True,
                 prompt=f"({p.type})",
                 id=f"param-{p.name}",
@@ -475,7 +600,7 @@ class SuperMenuApp(App):
             if isinstance(widget, Checkbox):
                 raw[name] = widget.value
             elif isinstance(widget, Select):
-                if widget.value is not Select.BLANK:
+                if widget.value is not Select.NULL:
                     raw[name] = widget.value
             else:
                 val = widget.value.strip()
@@ -553,11 +678,15 @@ class SuperMenuApp(App):
         widget = self._data_widget(result)
         if widget is not None:
             await panel.mount(widget)
+            if isinstance(widget, GeoMap):
+                widget.focus()  # so zoom/pan keys work without an extra Tab
 
     def _data_widget(self, result: CommandResult) -> Optional[Widget]:
         data = result.data
         if data is None:
             return None
+        if result.kind == "geojson" and isinstance(data, dict):
+            return GeoMap(data)
         if result.kind == "table" and isinstance(data, list):
             if not data:
                 return Static("no rows", classes="muted")

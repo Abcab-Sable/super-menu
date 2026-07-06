@@ -5,6 +5,7 @@
     super-menu <plugin>             list a plugin's commands
     super-menu <plugin> <cmd> ...   run a command (headless)
     super-menu mcp                  run the MCP server (stdio) for Claude Code
+    super-menu web                  launch the route-planner web UI (real road map)
 
 Headless command runs accept ``--name value`` / ``--name=value`` flags matching
 the command's params, plus ``--json`` to emit the raw structured result.
@@ -12,9 +13,12 @@ the command's params, plus ``--json`` to emit the raw structured result.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from typing import Any
 
+from super_menu.core import braille
+from super_menu.core.config import load_dotenv
 from super_menu.core.registry import default_registry
 from super_menu.core.plugin import Command, CommandResult
 
@@ -59,7 +63,9 @@ def _print_result(result: CommandResult) -> int:
     if result.summary:
         print(result.summary)
     data = result.data
-    if result.kind == "table" and isinstance(data, list) and data:
+    if result.kind == "geojson" and isinstance(data, dict):
+        _print_map(data)
+    elif result.kind == "table" and isinstance(data, list) and data:
         cols = result.columns or list(data[0].keys())
         _print_table(data, cols)
     elif result.kind in ("json",) or isinstance(data, (dict,)):
@@ -83,6 +89,20 @@ def _print_table(rows: list[dict], cols: list[str], max_width: int = 60) -> None
     print("  ".join("-" * widths[c] for c in cols))
     for r in rows:
         print("  ".join(cell(r, c).ljust(widths[c]) for c in cols))
+
+
+def _print_map(geojson: dict) -> None:
+    from rich.console import Console
+
+    from super_menu.core import roads
+
+    size = shutil.get_terminal_size((80, 24))
+    cols = min(max(size.columns - 2, 40), 110)
+    rows = min(max(size.lines - 8, 16), 30)
+    view = braille.data_bbox(geojson)
+    road_lines = roads.roads_for_view(view) if view else []  # [] offline — map still renders
+    Console().print(braille.render_geojson(geojson, width=cols, height=rows,
+                                           roads=road_lines))
 
 
 def _list_plugins() -> int:
@@ -145,6 +165,7 @@ def _force_utf8() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _force_utf8()
+    load_dotenv()  # pick up ORS_API_KEY (etc.) from a .env in the working directory
     argv = list(sys.argv[1:] if argv is None else argv)
 
     if not argv:
@@ -160,6 +181,16 @@ def main(argv: list[str] | None = None) -> int:
     if head == "mcp":
         from super_menu.mcp_server import run as run_mcp
         run_mcp()
+        return 0
+    if head == "web":
+        from super_menu.web.server import run as run_web
+        params, _ = _parse_flags(argv[1:])  # accepts --port 8080 and --port=8080
+        try:
+            port = int(params.get("port", 8765))
+        except (TypeError, ValueError):
+            print(f"invalid --port {params.get('port')!r}; using 8765", file=sys.stderr)
+            port = 8765
+        run_web(port=port)
         return 0
     if head == "list":
         return _list_plugins()
