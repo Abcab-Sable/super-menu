@@ -264,6 +264,52 @@
   @keyframes flowdash { to { stroke-dashoffset: -13; } }
   @media (max-width: 900px) { .tac { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
 
+  /* ---- tactical chat (Claude Code overlay on the route map) ---- */
+  .tac-chat { position: absolute; z-index: 1000; top: 10px; right: 10px; width: 300px;
+    max-height: calc(100% - 20px); display: flex; flex-direction: column;
+    background: rgba(6, 13, 24, .93); border: 1px solid var(--cyan-dim); backdrop-filter: blur(6px);
+    box-shadow: 0 0 24px rgba(0, 0, 0, .5);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+  .tac-chat.hidden { display: none; }
+  .tac-chat .ch-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--cyan-dim); font-family: var(--mono); font-size: 10px;
+    letter-spacing: .14em; color: var(--cyan); text-transform: uppercase; }
+  .tac-chat .ch-head .led { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan); }
+  .tac-chat .ch-min { margin-left: auto; all: unset; cursor: pointer; color: var(--muted);
+    font-size: 16px; line-height: 1; padding: 0 4px; }
+  .tac-chat .ch-min:hover { color: var(--fg); }
+  .tac-chat .ch-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex;
+    flex-direction: column; gap: 8px; min-height: 90px; }
+  .tac-chat .ch-msgs::-webkit-scrollbar { width: 6px; }
+  .tac-chat .ch-msgs::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .ch-empty { margin: auto; text-align: center; color: var(--muted); font-family: var(--mono);
+    font-size: 10px; line-height: 1.7; letter-spacing: .03em; }
+  .ch-empty b { color: var(--cyan); }
+  .ch-bubble { font-size: 12px; line-height: 1.5; padding: 8px 10px; max-width: 90%;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .ch-bubble.user { align-self: flex-end; color: #04202b; background: var(--cyan); font-weight: 600; }
+  .ch-bubble.assistant { align-self: flex-start; color: var(--fg); background: rgba(56, 225, 255, .08);
+    border: 1px solid var(--cyan-dim); }
+  .ch-bubble.thinking { color: var(--amber); font-style: italic; }
+  .tac-chat .ch-input { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--cyan-dim); }
+  .tac-chat textarea { flex: 1; resize: none; height: 34px; max-height: 110px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--fg); background: rgba(3, 10, 18, .8);
+    border: 1px solid var(--cyan-dim); }
+  .tac-chat textarea:focus { outline: none; border-color: var(--cyan); }
+  .tac-chat .ch-send { width: 36px; flex: none; cursor: pointer; border: none; color: #032430;
+    background: linear-gradient(135deg, var(--cyan), #7cf5ff); font-size: 14px;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .tac-chat .ch-send:disabled { opacity: .5; cursor: wait; }
+  .tac-chat-fab { position: absolute; z-index: 1000; top: 10px; right: 10px; display: none;
+    align-items: center; gap: 6px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--cyan);
+    color: var(--cyan); background: rgba(6, 13, 24, .93); font-family: var(--mono); font-size: 10px;
+    letter-spacing: .1em; text-transform: uppercase;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  .tac-chat-fab.show { display: inline-flex; }
+  .tac-chat-fab:hover { color: var(--fg); border-color: var(--fg); }
+
   /* ---- footer ---- */
   #foot { grid-area: foot; display: flex; align-items: center; gap: 16px; padding: 0 8px;
     font-family: var(--mono); font-size: 9.5px; color: var(--muted); letter-spacing: .14em; }
@@ -632,7 +678,12 @@ async function renderGeo(body, geojson) {
    Same execution path as everything else (/api/run); only the input surface
    is a map instead of a form. State survives switching commands. ======== */
 const tac = { map: null, origin: null, dest: null, zones: [], mode: 'origin',
-              layers: [], originPin: null, destPin: null, seq: 0 };
+              layers: [], originPin: null, destPin: null, seq: 0,
+              chatLog: [], chatSession: null, chatBusy: false, chatOpen: true };
+
+// /api/status once, cached — tells us whether the claude CLI is present.
+let _statusP = null;
+const getStatus = () => (_statusP ||= fetch('/api/status').then(r => r.json()).catch(() => ({})));
 
 const tacPin = color => `
   <svg style="filter:drop-shadow(0 0 6px ${color})" width="26" height="34" viewBox="0 0 30 40">
@@ -715,7 +766,138 @@ function renderTactical() {
     zs.forEach(z => tacAddZone(z.lat, z.lng, z.radius_km));
     if (tac.lastGeojson) tacDrawRoute(tac.lastGeojson, false);
     tacMetrics(tac.lastGeojson);
+    tacInitChat(L);
   });
+}
+
+/* ======== chat — Claude Code driving route-avoider on the tactical map.
+   Overlay pane on the map; a route event runs the same tacDrawRoute path and
+   rebuilds the waypoint/zone state so Claude's plan is hand-editable. ======== */
+function tacInitChat(L) {
+  getStatus().then(s => {
+    if (!s || !s.chat) return;             // pane only when the claude CLI is installed
+    const host = $('tac-map');
+    if (!host) return;
+    const fab = document.createElement('button');
+    fab.className = 'tac-chat-fab';
+    fab.textContent = '💬 ASK CLAUDE';
+    const pane = document.createElement('div');
+    pane.className = 'tac-chat';
+    pane.innerHTML = `
+      <div class="ch-head"><span class="led"></span>ASK CLAUDE
+        <button class="ch-min" title="hide">–</button></div>
+      <div class="ch-msgs" id="tac-ch-msgs"></div>
+      <div class="ch-input">
+        <textarea id="tac-ch-input" rows="1" placeholder="ask for a route…"></textarea>
+        <button class="ch-send" id="tac-ch-send" title="send">➤</button>
+      </div>`;
+    host.appendChild(fab);
+    host.appendChild(pane);
+    // keep clicks/scroll inside the pane from reaching the map (dropping pins etc.)
+    L.DomEvent.disableClickPropagation(pane);
+    L.DomEvent.disableScrollPropagation(pane);
+    L.DomEvent.disableClickPropagation(fab);
+
+    if (tac.chatLog.length) tac.chatLog.forEach(m => tacChatBubble(m.role, m.text, false));
+    else $('tac-ch-msgs').innerHTML = '<div class="ch-empty">Try <b>"route from Manchester ' +
+      'to Leeds avoiding Bolton"</b> — Claude plots it here for you to fine-tune.</div>';
+
+    const show = open => { pane.classList.toggle('hidden', !open);
+      fab.classList.toggle('show', !open); tac.chatOpen = open; };
+    show(tac.chatOpen !== false);
+    pane.querySelector('.ch-min').onclick = () => show(false);
+    fab.onclick = () => { show(true); $('tac-ch-input').focus(); };
+
+    const ta = $('tac-ch-input');
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tacSendChat(); } });
+    ta.addEventListener('input', e => { e.target.style.height = '34px';
+      e.target.style.height = Math.min(e.target.scrollHeight, 110) + 'px'; });
+    $('tac-ch-send').onclick = tacSendChat;
+  });
+}
+
+function tacChatBubble(cls, text, store) {
+  const box = $('tac-ch-msgs');
+  if (!box) return null;
+  box.querySelector('.ch-empty')?.remove();
+  const b = document.createElement('div');
+  b.className = 'ch-bubble ' + cls;
+  b.textContent = text;
+  box.appendChild(b);
+  box.scrollTop = box.scrollHeight;
+  if (store) tac.chatLog.push({ role: cls.includes('user') ? 'user' : 'assistant', text });
+  return b;
+}
+
+/* Rebuild waypoints + avoid zones from the route Claude produced (same shape the
+   renderer draws), so its plan drops straight into the manual controls. */
+function tacSyncFromGeojson(g) {
+  if (tac.originPin) { tac.map.removeLayer(tac.originPin); tac.originPin = null; }
+  if (tac.destPin) { tac.map.removeLayer(tac.destPin); tac.destPin = null; }
+  tac.origin = tac.dest = null;
+  tac.zones.splice(0).forEach(z => tac.map.removeLayer(z.circle));
+  tacZoneChips();
+  let pendingR = null;
+  for (const f of (g.features || [])) {
+    const p = f.properties || {}, geom = f.geometry || {}, c = geom.coordinates;
+    if (p.kind === 'origin' && geom.type === 'Point') tacSetPoint('origin', c[1], c[0], p.label || '');
+    else if (p.kind === 'destination' && geom.type === 'Point') tacSetPoint('destination', c[1], c[0], p.label || '');
+    else if (p.kind === 'avoid' && geom.type === 'Polygon') pendingR = p.radius_km;
+    else if (p.kind === 'avoid' && geom.type === 'Point') {
+      tacAddZone(c[1], c[0], pendingR ?? (tac.radius || 12)); pendingR = null;
+    }
+  }
+}
+
+async function tacSendChat() {
+  const ta = $('tac-ch-input');
+  const msg = ta.value.trim();
+  if (!msg || tac.chatBusy) return;
+  tacChatBubble('user', msg, true);
+  ta.value = ''; ta.style.height = '34px';
+  tac.chatBusy = true; $('tac-ch-send').disabled = true;
+  let assistant = null, text = '', drew = false;
+  try {
+    const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, session_id: tac.chatSession }) });
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i).split('\n').find(l => l.startsWith('data:'));
+        buf = buf.slice(i + 2);
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(5).trim());
+        if (ev.type === 'session') tac.chatSession = ev.session_id;
+        else if (ev.type === 'tool') { if (!assistant) assistant = tacChatBubble('assistant thinking', '◎ plotting route…', false); }
+        else if (ev.type === 'text') {
+          if (!assistant) assistant = tacChatBubble('assistant', '', false);
+          text += ev.text; assistant.className = 'ch-bubble assistant'; assistant.textContent = text;
+        } else if (ev.type === 'route' && ev.geojson) {
+          tac.lastGeojson = ev.geojson; tacSyncFromGeojson(ev.geojson);
+          tacDrawRoute(ev.geojson, true); tacMetrics(ev.geojson); drew = true;
+        } else if (ev.type === 'error') {
+          tacStatus(ev.message || 'claude error', true);
+          if (assistant && !text) { assistant.className = 'ch-bubble assistant'; assistant.textContent = '⚠ ' + (ev.message || 'error'); }
+        } else if (ev.type === 'done') {
+          if (assistant && !text && drew) { assistant.className = 'ch-bubble assistant'; assistant.textContent = '✓ course plotted on the map.'; }
+        }
+        const box = $('tac-ch-msgs'); if (box) box.scrollTop = box.scrollHeight;
+      }
+    }
+  } catch (e) {
+    tacStatus('chat link failure', true);
+  } finally {
+    tac.chatBusy = false;
+    const b = $('tac-ch-send'); if (b) b.disabled = false;
+    if (assistant) tac.chatLog.push({ role: 'assistant', text: assistant.textContent });
+    ta.focus();
+  }
 }
 
 function tacSetMode(m) {
