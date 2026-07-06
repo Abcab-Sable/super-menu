@@ -221,14 +221,22 @@ def bbox_of(coords: list[list[float]]) -> Optional[list[float]]:
 def feature_collection(route_geometry: dict, specs: list[AvoidSpec],
                        origin: tuple[float, float], destination: tuple[float, float],
                        origin_label: str = "start",
-                       destination_label: str = "end") -> dict:
+                       destination_label: str = "end",
+                       baseline_geometry: dict | None = None) -> dict:
     """Bundle the route line, avoid circles, and labelled endpoints into one
     GeoJSON FeatureCollection — the renderer draws it as a map, and it drops
     straight into geojson.io. Each avoid circle gets a numbered centre marker and
-    the endpoints get ``A``/``B`` markers so the map has a legend."""
-    features: list[dict] = [
-        {"type": "Feature", "properties": {"kind": "route"}, "geometry": route_geometry},
-    ]
+    the endpoints get ``A``/``B`` markers so the map has a legend.
+
+    ``baseline_geometry`` is the *unconstrained* route (no zones, no motorway
+    flag): renderers draw it as a ghost line under the real route, so the user
+    can see where the avoidance actually bent the path."""
+    features: list[dict] = []
+    if baseline_geometry:   # first, so everything above draws over the ghost
+        features.append({"type": "Feature", "properties": {"kind": "baseline"},
+                         "geometry": baseline_geometry})
+    features.append(
+        {"type": "Feature", "properties": {"kind": "route"}, "geometry": route_geometry})
     for i, s in enumerate((s for s in specs if s.resolved), start=1):
         features.append({
             "type": "Feature",

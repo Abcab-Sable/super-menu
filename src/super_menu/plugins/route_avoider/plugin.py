@@ -113,6 +113,19 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
     except RoutingError as exc:
         return CommandResult.err(str(exc))
 
+    # Trust pack: when the route was constrained, also fetch the *unconstrained*
+    # baseline so the user can see the counterfactual (a ghost line on the map)
+    # and what the avoidance cost them. Best-effort — a baseline failure never
+    # fails the route (self-hosted Valhalla answers this in ~100 ms; the stub is
+    # instant; only a flaky hosted engine would ever skip it).
+    baseline = None
+    if rings or apply_motorways:
+        try:
+            baseline = engine.route(o, d, avoid_rings=[], avoid_motorways=False,
+                                    profile=profile)
+        except RoutingError:
+            pass
+
     # The result IS a GeoJSON FeatureCollection (route line + avoid circles +
     # endpoints), so the TUI/CLI render it as a braille map and MCP/--json get a
     # payload that drops straight into geojson.io. Route metrics ride along as
@@ -122,7 +135,15 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
     o_label = "start" if geo.parse_point(origin) else origin
     d_label = "end" if geo.parse_point(destination) else destination
     fc = geo.feature_collection(result.geometry, specs, (o.lat, o.lng), (d.lat, d.lng),
-                                origin_label=o_label, destination_label=d_label)
+                                origin_label=o_label, destination_label=d_label,
+                                baseline_geometry=baseline.geometry if baseline else None)
+    if baseline:
+        fc.update({
+            "baseline_km": baseline.distance_km,
+            "baseline_min": baseline.duration_min,
+            "detour_km": round(result.distance_km - baseline.distance_km, 2),
+            "detour_min": round(result.duration_min - baseline.duration_min, 1),
+        })
     fc.update({
         "bbox": result.bbox,
         "engine": engine.name,
@@ -137,9 +158,12 @@ def cmd_route(origin: str, destination: str, avoid: str | None = None,
 
     zones = f", {len(rings)} zone(s) avoided" if rings else ""
     motor = ", motorway-free" if apply_motorways else ""
+    detour = ""
+    if baseline and (fc["detour_km"] > 0 or fc["detour_min"] > 0):
+        detour = f" (+{fc['detour_km']} km, +{fc['detour_min']} min vs direct)"
     estimate = "  [offline estimate — set ORS_API_KEY for real routing]" if not engine.live else ""
     summary = (f"{result.distance_km} km, {result.duration_min} min "
-               f"via {profile}{zones}{motor}{estimate}")
+               f"via {profile}{zones}{motor}{detour}{estimate}")
     return CommandResult.ok_(data=fc, summary=summary, kind="geojson")
 
 

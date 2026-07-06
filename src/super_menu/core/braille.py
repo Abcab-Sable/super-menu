@@ -38,13 +38,14 @@ _PAD = 2
 # Style per feature ``kind`` (Rich style strings). Unknown kinds fall back to plain.
 _STYLE = {
     "coast": "grey37",
+    "baseline": "dark_cyan",   # the unconstrained ghost route, under everything
     "route": "bold cyan",
     "avoid": "yellow",
     "origin": "bold green",
     "destination": "bold red3",
 }
-_PRIORITY = {"coast": 0, "avoid": 1, "route": 3}  # which layer wins a shared cell
-_DEFAULT_PRIORITY = 2
+_PRIORITY = {"coast": 0, "baseline": 1, "avoid": 2, "route": 4}  # shared-cell winner
+_DEFAULT_PRIORITY = 3
 
 # Road underlay styling by OSM highway class (drawn at coast priority, after the
 # coastline, so roads win shared basemap cells but never cover plugin data).

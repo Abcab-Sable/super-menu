@@ -167,6 +167,28 @@ def test_engine_swap_via_seam(monkeypatch):
     assert res.data["engine"] == "fixed-test-engine"
 
 
+def test_constrained_route_carries_baseline():
+    """Trust pack: a zone-constrained route ships the unconstrained baseline as a
+    ghost feature plus detour metrics, so every surface can show the trade-off."""
+    res = plugin.cmd_route(origin="53.8008,-1.5491", destination="52.4140,-4.0810",
+                           avoid="53.1,-2.8,20,MidZone")
+    assert res.ok
+    kinds = [f["properties"]["kind"] for f in res.data["features"]]
+    assert kinds[0] == "baseline", "ghost line draws first, under everything"
+    assert res.data["baseline_km"] > 0
+    assert res.data["detour_km"] == round(
+        res.data["distance_km"] - res.data["baseline_km"], 2)
+    assert "vs direct" in res.summary
+
+
+def test_unconstrained_route_has_no_baseline():
+    res = plugin.cmd_route(origin="53.8008,-1.5491", destination="52.4140,-4.0810")
+    assert res.ok
+    kinds = {f["properties"]["kind"] for f in res.data["features"]}
+    assert "baseline" not in kinds and "baseline_km" not in res.data
+    assert "vs direct" not in res.summary
+
+
 def test_presets_and_config_commands():
     presets = plugin.cmd_presets()
     assert presets.ok and presets.kind == "table" and presets.data

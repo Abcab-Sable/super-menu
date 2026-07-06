@@ -608,6 +608,7 @@ async function renderGeo(body, geojson) {
   }).addTo(map);
   const styleFor = f => {
     const kind = (f.properties || {}).kind;
+    if (kind === 'baseline') return { color: '#5f7d95', weight: 3, dashArray: '8 8', opacity: .6 };
     if (kind === 'avoid') return { color: '#ffb454', weight: 2, dashArray: '6 6', fillColor: '#ffb454', fillOpacity: .12 };
     return { color: '#38e1ff', weight: 4, opacity: .95, className: 'glow' };
   };
@@ -812,7 +813,12 @@ function tacDrawRoute(geojson, fly) {
   const L = window.L;
   tac.layers.forEach(l => tac.map.removeLayer(l));
   tac.layers = [];
-  const line = { filter: f => f.geometry.type === 'LineString' };
+  const isBase = f => (f.properties || {}).kind === 'baseline';
+  const line = { filter: f => f.geometry.type === 'LineString' && !isBase(f) };
+  // the unconstrained baseline draws first as a dashed ghost — visual proof of
+  // where the avoidance bent the path
+  tac.layers.push(L.geoJSON(geojson, { filter: f => f.geometry.type === 'LineString' && isBase(f),
+    style: { color: '#5f7d95', weight: 3, dashArray: '8 8', opacity: .6 } }).addTo(tac.map));
   // glow = a wide low-opacity stroke, NOT a CSS drop-shadow filter: filters get
   // re-rastered every frame of the dash animation and freeze the renderer on
   // long (5k+ point) routes.
@@ -821,7 +827,7 @@ function tacDrawRoute(geojson, fly) {
   tac.layers.push(L.geoJSON(geojson, { ...line, style: { color: '#38e1ff', weight: 3.5, opacity: .95 } }).addTo(tac.map));
   // the animated dashes are decorative — run them on a decimated copy so a
   // 5k-point route doesn't get re-stroked at full resolution every frame
-  const routeFeat = (geojson.features || []).find(f => f.geometry.type === 'LineString');
+  const routeFeat = (geojson.features || []).find(f => f.geometry.type === 'LineString' && !isBase(f));
   if (routeFeat) {
     const pts = routeFeat.geometry.coordinates;
     const step = Math.max(1, Math.ceil(pts.length / 600));
@@ -829,7 +835,9 @@ function tacDrawRoute(geojson, fly) {
     tac.layers.push(L.geoJSON({ type: 'Feature', geometry: { type: 'LineString', coordinates: slim } },
       { style: { color: '#d9fbff', weight: 3.5, opacity: .9, className: 'flow' } }).addTo(tac.map));
   }
-  const b = tac.layers[2].getBounds();
+  const b = tac.layers[2].getBounds();          // route line
+  const g = tac.layers[0].getBounds();          // ghost baseline, if any
+  if (g.isValid()) b.extend(g);                 // frame both lines
   if (fly && b.isValid()) tac.map.flyToBounds(b.pad(0.15), { duration: .8 });
 }
 
@@ -842,7 +850,10 @@ function tacMetrics(geojson) {
                  ['avoid_zones_applied', 'ZONES', ''], ['engine', 'ENGINE', '']];
   box.innerHTML = picks.filter(([k]) => geojson[k] !== undefined)
     .map(([k, lbl, unit]) => `<span class="metric">${lbl} <b>${esc(String(geojson[k]))}${unit}</b></span>`)
-    .join('') + (geojson.live === false ? '<span class="metric" style="color:var(--amber)">ESTIMATE</span>' : '');
+    .join('')
+    + (geojson.detour_km !== undefined
+       ? `<span class="metric" style="color:var(--amber)" title="vs the direct route (dashed ghost line)">DETOUR <b>+${esc(String(geojson.detour_km))} km / +${esc(String(geojson.detour_min))} min</b></span>` : '')
+    + (geojson.live === false ? '<span class="metric" style="color:var(--amber)">ESTIMATE</span>' : '');
 }
 
 function tacStatus(msg, isErr) {
