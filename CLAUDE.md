@@ -32,6 +32,18 @@ returning a `CommandResult`; the surfaces render from that metadata.
   (`webserver.py` + `web/index.html`) is mounted at `/route` in the web dashboard; `deploy/`
   stands up a self-hosted Valhalla via Docker (see its README for the service-limit and WSL
   memory gotchas). Pure `geo.py` + the stub keep it fully unit-testable offline.
+- `src/super_menu/plugins/hazard_watch/` — live global disaster feed (`id = "hazard-watch"`);
+  the *reference example* for **poll-a-public-feed** plugins. Sources sit behind a `HazardFeed`
+  adapter (`feeds.py` = `EONETFeed` + `USGSFeed`, both **keyless**, + offline `SeedFeed`);
+  `collect()` merges them, tolerates any one feed failing, and falls back to a disk cache then a
+  packaged `data/seed.json` so it installs/demos/tests with zero setup and no network
+  (`active_feeds()` returns just the seed under `SUPER_MENU_OFFLINE`). Commands (`plugin.py`):
+  `active` emits a GeoJSON FeatureCollection of hazards — so it lights up as a braille map (TUI/CLI)
+  and drives the web deck's dedicated **threat board** (`web/static/index.html`, activates on the
+  `hazard-watch` id); `near` filters to a radius of a place/`lat,lng`; `sources` reports which feeds
+  are live. Its whole point is **composition**: the deck's "avoid these" button feeds active hazards
+  into route-avoider as avoid zones. Severity is stored 1/2/3, emitted as GDACS-style
+  red/orange/green words; the feature-property contract is documented at the top of `feeds.py`.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be
