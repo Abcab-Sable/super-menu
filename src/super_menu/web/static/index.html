@@ -284,15 +284,47 @@
     clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
   .zchip button { all: unset; cursor: pointer; padding: 0 3px; }
   .zchip button:hover { color: #fff; }
-  #tac-run { width: 100%; font-family: var(--disp); font-size: 14px; font-weight: 700;
+  #tac-run, #hz-scan { width: 100%; font-family: var(--disp); font-size: 14px; font-weight: 700;
     letter-spacing: .2em; padding: 11px 0; cursor: pointer; color: #032430; border: none;
     background: linear-gradient(135deg, var(--cyan), #7cf5ff);
     box-shadow: 0 0 22px rgba(56,225,255,.4); text-transform: uppercase; transition: .15s;
     clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
-  #tac-run:hover { filter: brightness(1.12); }
-  #tac-run:disabled { opacity: .55; cursor: wait; }
-  #tac-metrics { display: flex; flex-wrap: wrap; gap: 5px; }
-  #tac-metrics:empty { display: none; }
+  #tac-run:hover, #hz-scan:hover { filter: brightness(1.12); }
+  #tac-run:disabled, #hz-scan:disabled { opacity: .55; cursor: wait; }
+  #tac-metrics, #hz-metrics { display: flex; flex-wrap: wrap; gap: 5px; }
+  #tac-metrics:empty, #hz-metrics:empty { display: none; }
+
+  /* ---- hazard deck (hazard-watch › active) ---- */
+  .hz-cats { display: flex; flex-wrap: wrap; gap: 5px; }
+  .hzchip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono);
+    font-size: 9.5px; font-weight: 600; color: var(--fg); padding: 4px 9px; cursor: pointer;
+    background: rgba(56,225,255,.06); border: 1px solid var(--cyan-dim); transition: .15s;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .hzchip.off { opacity: .35; filter: grayscale(.8); }
+  .hzchip:hover { border-color: rgba(56,225,255,.4); }
+  .hz-list { display: flex; flex-direction: column; gap: 6px; }
+  .ev { padding: 8px 10px 8px 12px; cursor: pointer; border: 1px solid var(--cyan-dim);
+    background: rgba(56,225,255,.03); transition: .15s;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  .ev:hover { background: var(--cyan-soft); }
+  .ev.sel { border-color: var(--cyan); box-shadow: inset 2px 0 0 var(--cyan); }
+  .ev .ti { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700;
+    letter-spacing: .03em; }
+  .ev .ti .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: currentColor; box-shadow: 0 0 8px currentColor; }
+  .ev .meta { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 3px;
+    letter-spacing: .06em; text-transform: uppercase; }
+  #hz-route { width: 100%; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .1em; padding: 9px 0; cursor: pointer; color: var(--amber);
+    background: rgba(255,180,84,.07); border: 1px solid rgba(255,180,84,.4);
+    text-transform: uppercase; transition: .15s;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  #hz-route:hover { background: rgba(255,180,84,.16); box-shadow: 0 0 14px rgba(255,180,84,.25); }
+  .hz-pin { display: grid; place-items: center; width: 30px; height: 30px; font-size: 14px;
+    background: rgba(6,13,24,.85); border: 2px solid var(--c, var(--amber)); border-radius: 50%;
+    animation: hzpulse 2s ease-out infinite; }
+  @keyframes hzpulse { 0% { box-shadow: 0 0 0 0 var(--c, var(--amber)); }
+    70% { box-shadow: 0 0 0 14px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   .flow path { stroke-dasharray: 1 12; stroke-linecap: round; animation: flowdash 1.3s linear infinite; }
   @keyframes flowdash { to { stroke-dashoffset: -13; } }
   @media (max-width: 900px) { .tac { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
@@ -586,10 +618,17 @@ function buildForm() {
   const form = $('form');
   form.innerHTML = '';
   if (tac.map) { tac.map.remove(); tac.map = null; }   // leaving/re-entering tactical
+  if (hz.map) { hz.map.remove(); hz.map = null; }      // same for the hazard deck
   if (isTactical()) {                                   // the route command IS a map
     $('runrow').style.display = 'none';
     $('out-head').style.display = 'none';
     renderTactical();
+    return;
+  }
+  if (isHazard()) {                                     // so is the threat board
+    $('runrow').style.display = 'none';
+    $('out-head').style.display = 'none';
+    renderHazard();
     return;
   }
   $('out-body').innerHTML = '<div class="placeholder">AWAITING DIRECTIVE<br/>SET PARAMETERS // EXECUTE</div>';
@@ -1119,6 +1158,230 @@ function tacMetrics(geojson) {
 
 function tacStatus(msg, isErr) {
   const el = $('tac-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--err)' : 'var(--ok)';
+}
+
+/* ======== hazard deck — embedded threat board for hazard-watch › active.
+   FRONTEND CONTRACT (backend TBD — emit this and the deck lights up, no UI work):
+   plugin id "hazard-watch" with a command "active" returning kind=geojson, data =
+   FeatureCollection of Point or Polygon features whose properties may carry:
+     title      — display name of the event
+     category   — wildfire | storm | volcano | flood | earthquake | drought | ice | other
+     severity   — red | orange | green (GDACS alert levels; also accepts 1/2/3; default orange)
+     date       — ISO timestamp (optional)
+     source     — feed name, e.g. EONET / GDACS (optional)
+     radius_km  — danger radius for Point hazards (optional; per-category default below)
+   Unknown categories/severities degrade to "other"/orange. Top-level scalar keys on the
+   FeatureCollection (e.g. fetched_at) render as metric chips. Filtering is client-side,
+   so `active` needs no required params. ======== */
+const hz = { map: null, geojson: null, cats: null, minSev: 1, layers: [], shown: [],
+             center: null, zoom: null };
+const HZ_ICON = { wildfire: '🔥', storm: '🌀', volcano: '🌋', flood: '🌊', earthquake: '🌍',
+                  drought: '☀️', ice: '🧊', other: '⚠️' };
+const HZ_RADIUS = { wildfire: 30, storm: 100, volcano: 50, flood: 40, earthquake: 50,
+                    drought: 150, ice: 80, other: 25 };
+const HZ_COLOR = { 1: '#3dffa2', 2: '#ffb454', 3: '#ff5470' };
+const isHazard = () => state.plugin?.id === 'hazard-watch' && state.command?.name === 'active';
+
+const hzSev = p => { const s = String(p?.severity ?? '').toLowerCase();
+  return (s.includes('red') || s === '3') ? 3 : (s.includes('green') || s === '1') ? 1 : 2; };
+const hzCat = p => { const c = String(p?.category ?? '').toLowerCase();
+  return HZ_ICON[c] ? c : Object.keys(HZ_ICON).find(k => c.includes(k)) || 'other'; };
+const hzFiltered = () => (hz.geojson?.features || []).filter(f =>
+  hzSev(f.properties) >= hz.minSev && (!hz.cats || hz.cats.has(hzCat(f.properties))));
+
+function renderHazard() {
+  $('out-body').innerHTML = `
+  <div class="tac">
+    <div class="tac-ctl">
+      <div class="sect">// THREAT SCAN</div>
+      <button id="hz-scan">Scan Feeds</button>
+      <div id="hz-metrics"></div>
+      <div class="sect">// SEVERITY</div>
+      <div class="seg3" id="hz-sevseg">
+        <button data-s="1">all</button>
+        <button data-s="2">orange+</button>
+        <button data-s="3">red</button>
+      </div>
+      <div class="sect">// CATEGORIES</div>
+      <div class="hz-cats" id="hz-cats"></div>
+      <div class="sect">// ACTIVE EVENTS</div>
+      <div class="hz-list" id="hz-list"></div>
+      <button id="hz-route" title="drop the visible hazards into route-avoider as avoid zones">⛔ Avoid these in route planner</button>
+      <div id="hz-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></div>
+    </div>
+    <div class="tac-map" id="hz-map"></div>
+  </div>`;
+  document.querySelectorAll('#hz-sevseg button').forEach(b => {
+    b.classList.toggle('active', +b.dataset.s === hz.minSev);
+    b.onclick = () => { hz.minSev = +b.dataset.s;
+      document.querySelectorAll('#hz-sevseg button').forEach(x =>
+        x.classList.toggle('active', x === b));
+      hzDraw(false); };
+  });
+  $('hz-scan').onclick = hzScan;
+  $('hz-route').onclick = hzToRoute;
+  hzCatsRender();
+  ensureLeaflet().then(L => {
+    hz.map = L.map('hz-map', { zoomControl: true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      className: 'stark-tiles',
+      maxZoom: 20, subdomains: 'abcd',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+    }).addTo(hz.map);
+    hz.map.setView(hz.center || [25, 10], hz.zoom || 2);
+    hz.map.on('moveend', () => { hz.center = hz.map.getCenter(); hz.zoom = hz.map.getZoom(); });
+    if (hz.geojson) hzDraw(false); else hzScan();
+  });
+}
+
+async function hzScan() {
+  const btn = $('hz-scan');
+  if (btn) { btn.disabled = true; btn.textContent = 'SCANNING…'; }
+  let res;
+  try {
+    res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin: 'hazard-watch', command: 'active', params: {} }) })
+      .then(r => r.json());
+  } catch (e) { res = { ok: false, summary: 'link failure' }; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Scan Feeds'; }
+  if (!res.ok) { hzStatus(res.summary || 'scan failed', true); return; }
+  hz.geojson = res.data || { type: 'FeatureCollection', features: [] };
+  hz.cats = null;                                       // new data — reset category filter
+  hzStatus('◉ ' + (res.summary || 'scan complete'));
+  hzCatsRender();
+  hzDraw(true);
+}
+
+function hzCatsRender() {
+  const box = $('hz-cats');
+  if (!box) return;
+  const present = [...new Set((hz.geojson?.features || []).map(f => hzCat(f.properties)))];
+  box.innerHTML = present.length ? '' :
+    '<span style="font-family:var(--mono);font-size:9.5px;color:var(--muted)">— awaiting scan</span>';
+  present.forEach(c => {
+    const el = document.createElement('span');
+    el.className = 'hzchip' + (hz.cats && !hz.cats.has(c) ? ' off' : '');
+    el.textContent = `${HZ_ICON[c]} ${c}`;
+    el.onclick = () => {
+      if (!hz.cats) hz.cats = new Set(present);
+      hz.cats.has(c) ? hz.cats.delete(c) : hz.cats.add(c);
+      if (hz.cats.size === present.length) hz.cats = null;   // all on = no filter
+      hzCatsRender(); hzDraw(false);
+    };
+    box.appendChild(el);
+  });
+}
+
+function hzDraw(fit) {
+  if (!hz.map) return;
+  const L = window.L;
+  hz.layers.forEach(l => hz.map.removeLayer(l));
+  hz.layers = [];
+  const feats = hzFiltered();
+  feats.forEach((f, i) => {
+    const p = f.properties || {}, color = HZ_COLOR[hzSev(p)];
+    let layer;
+    if ((f.geometry || {}).type === 'Point') {
+      const [lng, lat] = f.geometry.coordinates;
+      layer = L.marker([lat, lng], { icon: L.divIcon({ className: '',
+        html: `<div class="hz-pin" style="--c:${color}">${HZ_ICON[hzCat(p)]}</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15] }) });
+    } else {
+      layer = L.geoJSON(f, { style: { color, weight: 2, dashArray: '6 6',
+        fillColor: color, fillOpacity: .12 } });
+    }
+    layer.bindTooltip(p.title || p.name || hzCat(p));
+    layer.on('click', () => hzSelect(i));
+    layer.addTo(hz.map);
+    hz.layers.push(layer);
+  });
+  hzList(feats);
+  hzMetricsRender(feats);
+  if (fit && hz.layers.length) {
+    const b = L.latLngBounds([]);
+    hz.layers.forEach(l => l.getBounds ? b.extend(l.getBounds()) : b.extend(l.getLatLng()));
+    if (b.isValid()) hz.map.fitBounds(b.pad(0.2));
+  }
+}
+
+function hzList(feats) {
+  hz.shown = feats;
+  const box = $('hz-list');
+  if (!box) return;
+  box.innerHTML = feats.length ? '' :
+    '<div style="font-family:var(--mono);font-size:10px;color:var(--muted)">no events match the filters</div>';
+  feats.forEach((f, i) => {
+    const p = f.properties || {}, sev = hzSev(p);
+    const el = document.createElement('div');
+    el.className = 'ev';
+    el.dataset.n = i;
+    el.innerHTML = `<div class="ti" style="color:${HZ_COLOR[sev]}"><span class="dot"></span>
+        <span style="color:var(--fg)">${HZ_ICON[hzCat(p)]} ${esc(p.title || p.name || 'event')}</span></div>
+      <div class="meta">${esc([hzCat(p), ['', 'green', 'orange', 'red'][sev], p.source,
+        String(p.date || '').slice(0, 10)].filter(Boolean).join(' · '))}</div>`;
+    el.onclick = () => hzSelect(i);
+    box.appendChild(el);
+  });
+}
+
+function hzMetricsRender(feats) {
+  const box = $('hz-metrics');
+  if (!box) return;
+  const reds = feats.filter(f => hzSev(f.properties) === 3).length;
+  const skip = new Set(['type', 'features', 'bbox']);
+  const scalars = Object.entries(hz.geojson || {})
+    .filter(([k, v]) => !skip.has(k) && (typeof v === 'string' || typeof v === 'number'));
+  box.innerHTML = `<span class="metric">ACTIVE <b>${feats.length}</b></span>` +
+    (reds ? `<span class="metric" style="color:var(--err)">RED <b>${reds}</b></span>` : '') +
+    scalars.map(([k, v]) =>
+      `<span class="metric">${esc(k.replace(/_/g, ' '))} <b>${esc(String(v))}</b></span>`).join('');
+}
+
+function hzCenter(f) {
+  const g = f.geometry || {};
+  if (g.type === 'Point') return [g.coordinates[1], g.coordinates[0]];
+  const b = window.L.geoJSON(f).getBounds();
+  return b.isValid() ? b.getCenter() : null;
+}
+
+function hzSelect(i) {
+  document.querySelectorAll('#hz-list .ev').forEach(el =>
+    el.classList.toggle('sel', +el.dataset.n === i));
+  document.querySelector(`#hz-list .ev[data-n="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+  const f = hz.shown[i];
+  if (!f) return;
+  const c = hzCenter(f);
+  if (c) hz.map.flyTo(c, Math.max(hz.map.getZoom(), 5), { duration: .7 });
+}
+
+/* the bridge: visible hazards → route-avoider avoid zones. Pure frontend — the
+   zones ride the same tac state renderTactical() restores onto its map. */
+function hzZone(f) {
+  const p = f.properties || {}, g = f.geometry || {};
+  if (g.type === 'Point')
+    return { lat: g.coordinates[1], lng: g.coordinates[0],
+             radius_km: Math.round(p.radius_km || HZ_RADIUS[hzCat(p)]) };
+  const b = window.L.geoJSON(f).getBounds();
+  if (!b.isValid()) return null;
+  const c = b.getCenter();
+  return { lat: c.lat, lng: c.lng,
+           radius_km: Math.min(300, Math.max(5, Math.round(c.distanceTo(b.getNorthEast()) / 1000))) };
+}
+
+function hzToRoute() {
+  if (!state.menu.plugins.some(p => p.id === 'route-avoider')) {
+    hzStatus('route-avoider module offline', true); return; }
+  const zones = hzFiltered().map(hzZone).filter(Boolean);
+  if (!zones.length) { hzStatus('no hazards to avoid — adjust filters', true); return; }
+  tac.zones.push(...zones);
+  selectPlugin('route-avoider', 'route');
+}
+
+function hzStatus(msg, isErr) {
+  const el = $('hz-status');
   if (!el) return;
   el.textContent = msg;
   el.style.color = isErr ? 'var(--err)' : 'var(--ok)';
