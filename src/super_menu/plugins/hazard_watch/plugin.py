@@ -27,6 +27,16 @@ DEFAULT_LIMIT = 250
 
 _SEV_RANK = {"red": 3, "orange": 2, "green": 1}
 
+# Region focus presets (lat_min, lat_max, lng_min, lng_max). The global feed is
+# severity-ranked and capped, which can bury a country's low-severity regional
+# warnings (e.g. Poland's drought advisories) behind more-severe global events;
+# focusing on a region filters *before* the cap so that country's detail shows.
+REGIONS: dict[str, tuple[float, float, float, float]] = {
+    "uk": (49.8, 61.0, -8.7, 2.1),
+    "poland": (49.0, 54.9, 14.1, 24.2),
+    "europe": (34.0, 72.0, -25.0, 45.0),
+}
+
 # A small offline gazetteer so ``near`` works with names, not just coordinates —
 # the same honest-stub approach route_avoider's estimator uses for geocoding.
 # Unknown names ask for 'lat,lng' rather than guessing.
@@ -57,15 +67,27 @@ def _parse_point(text: str) -> tuple[float, float] | None:
     return None
 
 
+def _in_region(h: feeds.Hazard, bbox: tuple[float, float, float, float]) -> bool:
+    c = h.centroid()
+    if c is None:
+        return False
+    lat, lng = c
+    lat_min, lat_max, lng_min, lng_max = bbox
+    return lat_min <= lat <= lat_max and lng_min <= lng <= lng_max
+
+
 def _filter(hazards: list[feeds.Hazard], category: str | None,
-            min_severity: str | None) -> list[feeds.Hazard]:
+            min_severity: str | None, region: str | None = None) -> list[feeds.Hazard]:
     floor = _SEV_RANK.get((min_severity or "").lower(), 1)
     cat = (category or "").lower().strip()
+    bbox = REGIONS.get((region or "").lower().strip())
     out = []
     for h in hazards:
         if h.severity < floor:
             continue
         if cat and h.category != cat:
+            continue
+        if bbox and not _in_region(h, bbox):
             continue
         out.append(h)
     return out
@@ -104,18 +126,25 @@ def _note(bundle: dict) -> str:
 
 
 def cmd_active(category: str | None = None, min_severity: str | None = None,
-               days: int = 30, limit: int = DEFAULT_LIMIT) -> CommandResult:
+               region: str | None = None, days: int = 30,
+               limit: int = DEFAULT_LIMIT) -> CommandResult:
     if category and category.lower() not in CATEGORIES:
         return CommandResult.err(
             f"unknown category '{category}' — choose one of {', '.join(CATEGORIES)}")
+    if region and region.lower() not in REGIONS:
+        return CommandResult.err(
+            f"unknown region '{region}' — choose one of {', '.join(REGIONS)}")
     bundle = feeds.collect(days=days)
-    hazards = _trim(_filter(bundle["hazards"], category, min_severity), limit)
-    total = len(_filter(bundle["hazards"], category, min_severity))
+    matched = _filter(bundle["hazards"], category, min_severity, region)
+    hazards = _trim(matched, limit)
     fc = _collection(hazards, bundle, window_days=days)
+    if region:
+        fc["region"] = region.lower()
     reds = sum(1 for h in hazards if h.severity == 3)
     scope = f" {category}" if category else ""
-    shown = f" (showing {len(hazards)} of {total})" if total > len(hazards) else ""
-    summary = (f"{total}{scope} active event(s), {reds} red"
+    where = f" in {region.lower()}" if region else ""
+    shown = f" (showing {len(hazards)} of {len(matched)})" if len(matched) > len(hazards) else ""
+    summary = (f"{len(matched)}{scope} active event(s){where}, {reds} red"
                f" via {fc['sources']}{shown}{_note(bundle)}")
     return CommandResult.ok_(data=fc, summary=summary, kind="geojson")
 
@@ -199,6 +228,8 @@ class HazardWatchPlugin(Plugin):
                           help="Restrict to one hazard category."),
                     Param("min_severity", choices=sev_choices,
                           help="Only events at this severity or worse."),
+                    Param("region", choices=list(REGIONS),
+                          help="Focus on a region (uk/poland/europe) before the cap."),
                     Param("days", type="int", default=30,
                           help="Look back this many days for open events."),
                     Param("limit", type="int", default=DEFAULT_LIMIT,

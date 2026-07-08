@@ -15,7 +15,8 @@ from contextlib import contextmanager
 from super_menu.core.registry import default_registry
 from super_menu.plugins.hazard_watch import feeds, plugin
 from super_menu.plugins.hazard_watch.feeds import (
-    EONETFeed, Hazard, SeedFeed, USGSFeed,
+    EONETFeed, Hazard, IMGWFeed, SeedFeed, UKFloodFeed, USGSFeed,
+    _normalize, _pl_category, _teryt_voivodeship,
 )
 
 
@@ -127,6 +128,140 @@ def test_usgs_window_follows_days():
         assert "4.5_month" in seen["url"]
 
 
+# ----- UK Environment Agency flood feed ------------------------------------ #
+
+_EA_FLOODS = {"items": [
+    {"@id": "http://ea/1", "description": "River Aire at Leeds",
+     "severity": "Severe Flood Warning", "severityLevel": 1, "floodAreaID": "A1",
+     "timeRaised": "2026-07-08T06:00:00", "isTidal": False,
+     "floodArea": {"county": "West Yorkshire", "notation": "A1", "riverOrSea": "River Aire"}},
+    {"@id": "http://ea/2", "description": "Tidal Trent", "severity": "Flood Alert",
+     "severityLevel": 3, "floodAreaID": "A2", "timeRaised": "2026-07-08T05:00:00",
+     "floodArea": {"county": "Lincs", "notation": "A2", "riverOrSea": "Trent"}},
+    {"@id": "x", "description": "expired", "severity": "Warning no Longer in Force",
+     "severityLevel": 4, "floodAreaID": "A3", "floodArea": {}},
+]}
+_EA_AREAS = {"items": [{"notation": "A1", "lat": 53.79, "long": -1.54},
+                       {"notation": "A2", "lat": 53.2, "long": -0.8}]}
+
+
+def test_uk_flood_parse_severity_and_area_join():
+    def fake(url, timeout):
+        return _EA_AREAS if "floodAreas" in url else _EA_FLOODS
+    with _patched(feeds, "_get_json", fake), \
+            _patched(feeds, "_load_area_cache", lambda: {}), \
+            _patched(feeds, "_save_area_cache", lambda c: None):
+        out = UKFloodFeed().fetch(days=30, timeout=5)
+    assert len(out) == 2                                  # severityLevel 4 dropped
+    severe = next(h for h in out if h.title.startswith("River Aire"))
+    alert = next(h for h in out if h.title == "Tidal Trent")
+    assert severe.severity == 3 and alert.severity == 1  # Severe→red, Alert→green
+    assert severe.category == "flood" and severe.radius_km == 10.0
+    assert severe.geometry["coordinates"] == [-1.54, 53.79]   # [long, lat] from area join
+    assert severe.extra["county"] == "West Yorkshire"
+
+
+def test_uk_flood_no_active_skips_area_fetch():
+    """A quiet day (no active warnings) must not fetch the large area list."""
+    def fake(url, timeout):
+        if "floodAreas" in url:
+            raise AssertionError("area list must not be fetched when nothing is active")
+        return {"items": []}
+    with _patched(feeds, "_get_json", fake):
+        assert UKFloodFeed().fetch(days=30, timeout=5) == []
+
+
+def test_uk_flood_unresolved_area_is_skipped():
+    def fake(url, timeout):
+        return {"items": []} if "floodAreas" in url else _EA_FLOODS
+    with _patched(feeds, "_get_json", fake), \
+            _patched(feeds, "_load_area_cache", lambda: {}), \
+            _patched(feeds, "_save_area_cache", lambda c: None):
+        out = UKFloodFeed().fetch(days=30, timeout=5)
+    assert out == []                                     # no centroid ⇒ not invented
+
+
+# ----- Poland IMGW meteo + hydro feed -------------------------------------- #
+
+_PL_HYDRO = [
+    {"stopień": "-1", "zdarzenie": "Susza hydrologiczna", "data_od": "2026-05-17 08:45:56",
+     "data_do": "9999-12-31 23:59:59", "obszary": [{"wojewodztwo": "wielkopolskie"}]},
+    {"stopień": "3", "zdarzenie": "Gwałtowny wzrost stanów wody", "data_od": "2026-07-08 10:00:00",
+     "obszary": [{"wojewodztwo": "małopolskie"}, {"wojewodztwo": "podkarpackie"}]},
+]
+_PL_METEO = [
+    {"stopien": "2", "nazwa_zdarzenia": "Burze z gradem", "obowiazuje_od": "2026-07-08 14:00:00",
+     "teryt": ["1201", "1210", "1465"]},                 # voiv 12 (małopolskie) + 14 (mazowieckie)
+    {"stopien": "1", "zdarzenie": "Oblodzenie", "obszary": [{"teryt": ["2261", "2262"]}]},
+]
+
+
+def _imgw(meteo, hydro):
+    def fake(url, timeout):
+        if "warningsmeteo" in url:
+            return meteo
+        if "warningshydro" in url:
+            return hydro
+        return {"status": False, "message": "No products were found"}
+    return fake
+
+
+def test_imgw_hydro_nested_wojewodztwo_and_drought_level():
+    with _patched(feeds, "_get_json", _imgw({"status": False}, _PL_HYDRO)):
+        out = IMGWFeed().fetch(days=30, timeout=5)
+    droughts = [h for h in out if h.category == "drought"]
+    floods = [h for h in out if h.category == "flood"]
+    assert len(droughts) == 1 and droughts[0].severity == 1      # stopień -1 → green
+    assert droughts[0].date == "2026-05-17T08:45:56"             # 9999 data_do ignored
+    assert {h.extra["voivodeship"] for h in floods} == {"małopolskie", "podkarpackie"}
+    assert all(h.severity == 3 for h in floods)                  # stopień 3 → red
+
+
+def test_imgw_meteo_teryt_prefix_to_voivodeship():
+    with _patched(feeds, "_get_json", _imgw(_PL_METEO, [])):
+        out = IMGWFeed().fetch(days=30, timeout=5)
+    storms = {h.extra["voivodeship"] for h in out if h.category == "storm"}
+    assert storms == {"małopolskie", "mazowieckie"}   # 1465 → prefix 14 = mazowieckie
+    ice = [h for h in out if h.category == "ice"]
+    assert ice and ice[0].severity == 1 and ice[0].extra["voivodeship"] == "pomorskie"
+    assert all(h.radius_km == 70.0 for h in out)      # regional footprint
+
+
+def test_imgw_empty_endpoints_yield_nothing():
+    with _patched(feeds, "_get_json", _imgw({"status": False}, {"status": False})):
+        assert IMGWFeed().fetch(days=30, timeout=5) == []
+
+
+def test_imgw_one_endpoint_down_is_tolerated():
+    def fake(url, timeout):
+        if "warningsmeteo" in url:
+            raise feeds.HazardFeedError("meteo down")
+        return _PL_HYDRO
+    with _patched(feeds, "_get_json", fake):
+        out = IMGWFeed().fetch(days=30, timeout=5)
+    assert out and all(h.source == "IMGW" for h in out)   # hydro still delivered
+
+
+def test_pl_helpers():
+    assert _normalize("Dolnośląskie") == "dolnoslaskie"
+    assert _teryt_voivodeship("1465") == {"14"}
+    assert _teryt_voivodeship("99xx") == set()
+    assert _pl_category("Susza hydrologiczna", hydro=True) == "drought"
+    assert _pl_category("Opady marznące", hydro=False) == "ice"      # freezing → ice, not rain
+    assert _pl_category("Silny wiatr", hydro=False) == "storm"
+    assert _pl_category("Upał", hydro=False) == "other"
+
+
+def test_regional_feeds_registered_when_online():
+    was = os.environ.pop("SUPER_MENU_OFFLINE", None)
+    try:
+        names = {f.name for f in feeds.active_feeds()}
+    finally:
+        if was is not None:
+            os.environ["SUPER_MENU_OFFLINE"] = was
+    assert {"EONET", "USGS", "EA-Floods", "IMGW"} <= names
+
+
 # ----- collection seam + offline fallback ---------------------------------- #
 
 def test_collect_offline_uses_seed():
@@ -202,6 +337,24 @@ def test_active_limit_keeps_most_severe():
     ranks = [sev_rank[f["properties"]["severity"]] for f in feats]
     assert ranks == sorted(ranks, reverse=True), "cap must keep the worst first"
     assert "showing 3 of" in res.summary
+
+
+def test_active_region_filters_before_cap():
+    # The seed spans several countries; region focus keeps only the in-bbox events.
+    pl = plugin.cmd_active(region="poland")
+    assert pl.ok and pl.data["region"] == "poland"
+    hazards = [f for f in pl.data["features"] if f["properties"].get("category") != "origin"]
+    assert hazards and all(14.1 <= f["geometry"]["coordinates"][0] <= 24.2
+                           for f in hazards)              # all within Poland's longitudes
+    assert {f["properties"]["source"] for f in hazards} == {"IMGW"}
+    assert not plugin.cmd_active(region="atlantis").ok
+
+
+def test_active_region_uk_matches_ea_flood():
+    uk = plugin.cmd_active(region="uk")
+    assert uk.ok
+    srcs = {f["properties"]["source"] for f in uk.data["features"]}
+    assert "EA-Floods" in srcs                            # the seeded Lincoln warning
 
 
 def test_near_filters_by_distance_and_marks_origin():

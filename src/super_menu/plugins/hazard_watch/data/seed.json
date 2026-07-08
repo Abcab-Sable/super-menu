@@ -52,6 +52,21 @@
       "type": "Feature",
       "geometry": {"type": "Point", "coordinates": [-98.49, 29.42]},
       "properties": {"title": "Central Texas Flash Flooding", "category": "flood", "severity": "red", "source": "EONET", "date": "2026-07-08T11:30:00Z", "radius_km": 40}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-0.55462, 53.22002]},
+      "properties": {"title": "Watercourses in the Lincoln area", "category": "flood", "severity": "orange", "source": "EA-Floods", "date": "2026-07-08T07:15:00Z", "radius_km": 10, "severity_label": "Flood Warning", "county": "Lincolnshire", "river": "River Witham, Sincil Dyke"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [16.30, 51.00]},
+      "properties": {"title": "Burze z gradem — dolnośląskie", "category": "storm", "severity": "orange", "source": "IMGW", "date": "2026-07-08T14:00:00Z", "radius_km": 70, "event": "Burze z gradem", "level": "2", "voivodeship": "dolnośląskie"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [17.00, 52.40]},
+      "properties": {"title": "Susza hydrologiczna — wielkopolskie", "category": "drought", "severity": "green", "source": "IMGW", "date": "2026-05-17T08:45:56", "radius_km": 70, "event": "Susza hydrologiczna", "level": "-1", "voivodeship": "wielkopolskie"}
     }
   ]
 }

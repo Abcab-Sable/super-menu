@@ -1177,7 +1177,7 @@ function tacStatus(msg, isErr) {
    FeatureCollection (e.g. fetched_at) render as metric chips. Filtering is client-side,
    so `active` needs no required params. ======== */
 const hz = { map: null, geojson: null, cats: null, minSev: 1, layers: [], shown: [],
-             center: null, zoom: null };
+             center: null, zoom: null, region: '', scanSeq: 0 };
 const HZ_ICON = { wildfire: '🔥', storm: '🌀', volcano: '🌋', flood: '🌊', earthquake: '🌍',
                   drought: '☀️', ice: '🧊', other: '⚠️' };
 const HZ_RADIUS = { wildfire: 30, storm: 100, volcano: 50, flood: 40, earthquake: 50,
@@ -1199,6 +1199,13 @@ function renderHazard() {
       <div class="sect">// THREAT SCAN</div>
       <button id="hz-scan">Scan Feeds</button>
       <div id="hz-metrics"></div>
+      <div class="sect">// REGION</div>
+      <div class="seg3" id="hz-regionseg">
+        <button data-r="">world</button>
+        <button data-r="uk">UK</button>
+        <button data-r="poland">Poland</button>
+        <button data-r="europe">Europe</button>
+      </div>
       <div class="sect">// SEVERITY</div>
       <div class="seg3" id="hz-sevseg">
         <button data-s="1">all</button>
@@ -1221,6 +1228,13 @@ function renderHazard() {
         x.classList.toggle('active', x === b));
       hzDraw(false); };
   });
+  document.querySelectorAll('#hz-regionseg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.r === hz.region);
+    b.onclick = () => { hz.region = b.dataset.r;
+      document.querySelectorAll('#hz-regionseg button').forEach(x =>
+        x.classList.toggle('active', x === b));
+      hzScan(); };            // region filters server-side before the cap → re-scan
+  });
   $('hz-scan').onclick = hzScan;
   $('hz-route').onclick = hzToRoute;
   hzCatsRender();
@@ -1240,12 +1254,17 @@ function renderHazard() {
 async function hzScan() {
   const btn = $('hz-scan');
   if (btn) { btn.disabled = true; btn.textContent = 'SCANNING…'; }
+  // Guard overlapping scans (e.g. auto-scan on entry + a fast region click): only
+  // the newest scan may apply its result, so a slow earlier one can't clobber it.
+  const seq = ++hz.scanSeq;
   let res;
   try {
+    const params = hz.region ? { region: hz.region } : {};
     res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plugin: 'hazard-watch', command: 'active', params: {} }) })
+      body: JSON.stringify({ plugin: 'hazard-watch', command: 'active', params }) })
       .then(r => r.json());
   } catch (e) { res = { ok: false, summary: 'link failure' }; }
+  if (seq !== hz.scanSeq) return;            // superseded by a newer scan — drop this result
   if (btn) { btn.disabled = false; btn.textContent = 'Scan Feeds'; }
   if (!res.ok) { hzStatus(res.summary || 'scan failed', true); return; }
   hz.geojson = res.data || { type: 'FeatureCollection', features: [] };

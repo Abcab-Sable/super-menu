@@ -34,16 +34,22 @@ returning a `CommandResult`; the surfaces render from that metadata.
   memory gotchas). Pure `geo.py` + the stub keep it fully unit-testable offline.
 - `src/super_menu/plugins/hazard_watch/` — live global disaster feed (`id = "hazard-watch"`);
   the *reference example* for **poll-a-public-feed** plugins. Sources sit behind a `HazardFeed`
-  adapter (`feeds.py` = `EONETFeed` + `USGSFeed`, both **keyless**, + offline `SeedFeed`);
-  `collect()` merges them, tolerates any one feed failing, and falls back to a disk cache then a
-  packaged `data/seed.json` so it installs/demos/tests with zero setup and no network
-  (`active_feeds()` returns just the seed under `SUPER_MENU_OFFLINE`). Commands (`plugin.py`):
-  `active` emits a GeoJSON FeatureCollection of hazards — so it lights up as a braille map (TUI/CLI)
-  and drives the web deck's dedicated **threat board** (`web/static/index.html`, activates on the
-  `hazard-watch` id); `near` filters to a radius of a place/`lat,lng`; `sources` reports which feeds
-  are live. Its whole point is **composition**: the deck's "avoid these" button feeds active hazards
-  into route-avoider as avoid zones. Severity is stored 1/2/3, emitted as GDACS-style
-  red/orange/green words; the feature-property contract is documented at the top of `feeds.py`.
+  adapter (`feeds.py`), all **keyless**: two global (`EONETFeed`, `USGSFeed`) plus two regional —
+  `UKFloodFeed` (Environment Agency flood warnings; joins `/id/floods` to a disk-cached
+  `/id/floodAreas` centroid index for coordinates) and `IMGWFeed` (Poland, meteo+hydro; places each
+  warning by voivodeship name or TERYT powiat-code prefix via the `PL_VOIVODESHIPS` gazetteer) —
+  plus an offline `SeedFeed`. `collect()` merges them, tolerates any one feed failing, and falls
+  back to a disk cache then a packaged `data/seed.json` so it installs/demos/tests with zero setup
+  and no network (`active_feeds()` returns just the seed under `SUPER_MENU_OFFLINE`). Commands
+  (`plugin.py`): `active` emits a GeoJSON FeatureCollection of hazards — so it lights up as a braille
+  map (TUI/CLI) and drives the web deck's dedicated **threat board** (`web/static/index.html`,
+  activates on the `hazard-watch` id); its `region` param (`uk`/`poland`/`europe`, bbox in
+  `REGIONS`) filters *before* the severity cap so a country's low-severity regional warnings aren't
+  buried (the deck exposes it as region-focus buttons). `near` filters to a radius of a
+  place/`lat,lng`; `sources` reports which feeds are live. Its whole point is **composition**: the
+  deck's "avoid these" button feeds active hazards into route-avoider as avoid zones. Severity is
+  stored 1/2/3, emitted as GDACS-style red/orange/green words; the feature-property contract is
+  documented at the top of `feeds.py`.
 
 ## Conventions
 - A plugin handler must return `CommandResult` (use `CommandResult.ok_` / `.err`); `data` must be
