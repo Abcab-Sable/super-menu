@@ -7,16 +7,21 @@ a fake fetcher and ``test_route_avoider`` swaps the routing engine behind its
 seam. Standalone runners don't load conftest, so we force offline at import time.
 """
 import os
+import tempfile
 
 os.environ.setdefault("SUPER_MENU_OFFLINE", "1")
+# Redirect runtime caches to a throwaway dir so the disk-cache short-circuit is
+# deterministic and never reads the developer's real last_scan.json.
+os.environ.setdefault("SUPER_MENU_HOME", tempfile.mkdtemp(prefix="hazwatch-test-"))
 
+import time
 from contextlib import contextmanager
 
 from super_menu.core.registry import default_registry
 from super_menu.plugins.hazard_watch import feeds, plugin
 from super_menu.plugins.hazard_watch.feeds import (
-    EONETFeed, Hazard, IMGWFeed, SeedFeed, UKFloodFeed, USGSFeed,
-    _normalize, _pl_category, _teryt_voivodeship,
+    EONETFeed, GDACSFeed, Hazard, IMGWFeed, MetOfficeFeed, SeedFeed, UKFloodFeed,
+    USGSFeed, _normalize, _pl_category, _teryt_voivodeship, _uk_category,
 )
 
 
@@ -259,7 +264,120 @@ def test_regional_feeds_registered_when_online():
     finally:
         if was is not None:
             os.environ["SUPER_MENU_OFFLINE"] = was
-    assert {"EONET", "USGS", "EA-Floods", "IMGW"} <= names
+    assert {"EONET", "USGS", "GDACS", "EA-Floods", "MetOffice", "IMGW"} <= names
+
+
+# ----- GDACS global RSS feed ----------------------------------------------- #
+
+_GDACS_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:gdacs="http://www.gdacs.org"
+     xmlns:georss="http://www.georss.org/georss">
+  <channel>
+    <item>
+      <title>Green forest fire notification in Australia</title>
+      <link>https://www.gdacs.org/report.aspx?eventtype=WF&amp;eventid=1</link>
+      <pubDate>Thu, 09 Jul 2026 15:00:36 GMT</pubDate>
+      <georss:point>-14.88 142.23</georss:point>
+      <gdacs:eventtype>WF</gdacs:eventtype>
+      <gdacs:alertlevel>Green</gdacs:alertlevel>
+      <gdacs:country>Australia</gdacs:country>
+    </item>
+    <item>
+      <title>Red earthquake alert (M7.1)</title>
+      <link>https://www.gdacs.org/report.aspx?eventtype=EQ&amp;eventid=2</link>
+      <pubDate>Wed, 08 Jul 2026 10:00:00 GMT</pubDate>
+      <georss:point>38.2 -122.0</georss:point>
+      <gdacs:eventtype>EQ</gdacs:eventtype>
+      <gdacs:alertlevel>Red</gdacs:alertlevel>
+    </item>
+    <item>
+      <title>No coordinates here</title>
+      <gdacs:eventtype>TC</gdacs:eventtype>
+      <gdacs:alertlevel>Orange</gdacs:alertlevel>
+    </item>
+  </channel>
+</rss>"""
+
+
+def test_gdacs_parse_alert_levels_and_types():
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(_GDACS_RSS)
+    with _patched(feeds, "_get_xml", lambda url, timeout: root):
+        out = GDACSFeed().fetch(days=7, timeout=1)
+    assert len(out) == 2                                  # the point-less item is skipped
+    fire = next(h for h in out if h.category == "wildfire")
+    quake = next(h for h in out if h.category == "earthquake")
+    assert fire.severity == 1 and quake.severity == 3    # Green→green(1), Red→red(3)
+    assert fire.geometry["coordinates"] == [142.23, -14.88]   # [lng, lat]
+    assert fire.extra["country"] == "Australia"
+    assert quake.extra["event_url"].endswith("eventid=2")
+    assert quake.date and quake.date.startswith("2026-07-08T10:00:00")
+    assert all(h.source == "GDACS" for h in out)
+
+
+def test_gdacs_unknown_type_is_other():
+    rss = _GDACS_RSS.replace("<gdacs:eventtype>WF</gdacs:eventtype>",
+                             "<gdacs:eventtype>ZZ</gdacs:eventtype>")
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(rss)
+    with _patched(feeds, "_get_xml", lambda url, timeout: root):
+        out = GDACSFeed().fetch(days=7, timeout=1)
+    assert any(h.category == "other" for h in out)
+
+
+# ----- UK Met Office severe-weather feed ----------------------------------- #
+
+def _metoffice_region_rss(title):
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <item><title>{title}</title>
+    <link>https://www.metoffice.gov.uk/weather/warnings</link>
+    <pubDate>Wed, 08 Jul 2026 09:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+
+def test_metoffice_places_by_region_and_reads_colour():
+    import xml.etree.ElementTree as ET
+    # Only Wales ("wl") carries a warning; every other region is empty.
+    def fake(url, timeout):
+        if url.endswith("/wl"):
+            return ET.fromstring(_metoffice_region_rss("Amber warning of rain"))
+        return ET.fromstring("<rss version='2.0'><channel/></rss>")
+    with _patched(feeds, "_get_xml", fake):
+        out = MetOfficeFeed().fetch(days=7, timeout=1)
+    assert len(out) == 1
+    h = out[0]
+    assert h.severity == 2 and h.extra["colour"] == "amber"   # amber → 2
+    assert h.category == "flood"                              # rain → flood
+    assert h.extra["region"] == "Wales"
+    assert h.geometry["coordinates"] == [-3.80, 52.40]        # Wales centroid, [lng, lat]
+    assert h.radius_km == feeds.UK_WARNING_RADIUS_KM
+    assert h.title.startswith("Amber warning of rain — Wales")
+
+
+def test_metoffice_all_regions_down_raises():
+    def boom(url, timeout):
+        raise feeds.HazardFeedError("region unreachable")
+    with _patched(feeds, "_get_xml", boom):
+        try:
+            MetOfficeFeed().fetch(days=7, timeout=1)
+        except feeds.HazardFeedError:
+            return
+    raise AssertionError("a total regional outage must raise, not look like a quiet day")
+
+
+def test_metoffice_quiet_day_is_empty_not_error():
+    import xml.etree.ElementTree as ET
+    with _patched(feeds, "_get_xml",
+                  lambda url, timeout: ET.fromstring("<rss version='2.0'><channel/></rss>")):
+        assert MetOfficeFeed().fetch(days=7, timeout=1) == []
+
+
+def test_uk_category_mapping():
+    assert _uk_category("Yellow warning of snow and ice") == "ice"
+    assert _uk_category("Amber warning of thunderstorms") == "storm"
+    assert _uk_category("Red warning of rain") == "flood"
+    assert _uk_category("Yellow warning of extreme heat") == "other"
 
 
 # ----- collection seam + offline fallback ---------------------------------- #
@@ -295,6 +413,115 @@ def test_collect_all_fail_falls_back_to_seed():
             _patched(feeds, "_read_cache", lambda *a, **k: None):
         bundle = feeds.collect(days=7)
     assert bundle["hazards"] and bundle["sources"] == ["seed"]
+
+
+# ----- disk-cache short-circuit + per-feed backfill ------------------------ #
+
+def _clear_hazard_cache():
+    for path in (feeds._cache_path(), feeds._feed_cache_path()):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+class _SpyFeed(feeds.HazardFeed):
+    """A live feed that counts fetches and returns one fixed hazard."""
+    name = "spy"
+    live = True
+
+    def __init__(self):
+        self.calls = 0
+
+    def fetch(self, days, timeout):
+        self.calls += 1
+        return [Hazard(title="spy-event", category="storm", severity=2, source="spy",
+                       geometry={"type": "Point", "coordinates": [0.0, 0.0]})]
+
+
+class _FlakyFeed(feeds.HazardFeed):
+    """A live feed whose fetch can be flipped to fail on demand."""
+    live = True
+
+    def __init__(self, name, hazards):
+        self.name = name
+        self._hazards = hazards
+        self.fail = False
+
+    def fetch(self, days, timeout):
+        if self.fail:
+            raise feeds.HazardFeedError("down")
+        return list(self._hazards)
+
+
+def test_fresh_cache_short_circuits_network():
+    _clear_hazard_cache()
+    spy = _SpyFeed()
+    try:
+        with _patched(feeds, "active_feeds", lambda: [spy]):
+            first = feeds.collect(force=True)          # populates the disk cache
+            assert spy.calls == 1 and first["from_cache"] is False
+            second = feeds.collect()                   # within 15 min → served from disk
+            assert spy.calls == 1, "a fresh cache must not re-poll the feeds"
+            assert second["from_cache"] is True and second["live"] is True
+            feeds.collect(force=True)                  # force bypasses the cache
+            assert spy.calls == 2
+    finally:
+        _clear_hazard_cache()
+
+
+def test_stale_cache_is_not_short_circuited():
+    _clear_hazard_cache()
+    spy = _SpyFeed()
+    try:
+        with _patched(feeds, "active_feeds", lambda: [spy]):
+            feeds.collect(force=True)                  # writes the cache
+            # Backdate the cache well past the 15-min freshness window.
+            old = time.time() - (feeds._CACHE_TTL_S + 120)
+            os.utime(feeds._cache_path(), (old, old))
+            feeds.collect()                            # stale → must re-poll
+            assert spy.calls == 2
+    finally:
+        _clear_hazard_cache()
+
+
+def test_per_feed_backfill_on_single_failure():
+    _clear_hazard_cache()
+    h_a = Hazard(title="A-event", category="storm", severity=2, source="AA",
+                 geometry={"type": "Point", "coordinates": [1.0, 1.0]})
+    h_b = Hazard(title="B-event", category="flood", severity=3, source="BB",
+                 geometry={"type": "Point", "coordinates": [2.0, 2.0]})
+    a, b = _FlakyFeed("AA", [h_a]), _FlakyFeed("BB", [h_b])
+    try:
+        with _patched(feeds, "active_feeds", lambda: [a, b]):
+            first = feeds.collect(force=True)          # both good → per-feed cache seeded
+            assert {"A-event", "B-event"} <= {h.title for h in first["hazards"]}
+            b.fail = True
+            second = feeds.collect(force=True)         # B down → restored from its cache
+        titles = {h.title for h in second["hazards"]}
+        assert "A-event" in titles and "B-event" in titles   # B survives despite failing
+        assert "BB" in second["errors"]                      # failure still recorded
+        assert any("BB (cached)" == s for s in second["sources"])
+    finally:
+        _clear_hazard_cache()
+
+
+def test_per_feed_backfill_skipped_when_all_live_feeds_fail():
+    """If no live feed succeeds we take the whole-scan fallback, not fragments."""
+    _clear_hazard_cache()
+    h_a = Hazard(title="A-event", category="storm", severity=2, source="AA",
+                 geometry={"type": "Point", "coordinates": [1.0, 1.0]})
+    a = _FlakyFeed("AA", [h_a])
+    try:
+        with _patched(feeds, "active_feeds", lambda: [a]):
+            feeds.collect(force=True)                  # seed per-feed cache for AA
+            a.fail = True
+            with _patched(feeds, "_read_cache", lambda *args, **kw: None):
+                bundle = feeds.collect(force=True)     # AA down, no whole-scan cache → seed
+        assert bundle["sources"] == ["seed"] and "AA" in bundle["errors"]
+        assert all(h.title != "A-event" for h in bundle["hazards"])  # no fragment leak
+    finally:
+        _clear_hazard_cache()
 
 
 # ----- plugin commands (through the contract) ------------------------------ #

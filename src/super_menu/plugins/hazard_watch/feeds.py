@@ -6,12 +6,16 @@ flood service tomorrow) costs nothing above the seam — every feed's quirks
 (EONET's nested categories, USGS's epoch-ms timestamps, magnitude→severity
 scaling) are isolated inside one adapter that emits the same :class:`Hazard`.
 
-Two live feeds ship here, both **keyless** (the free-for-dev zero-setup pattern):
+Several live feeds ship here, all **keyless** (the free-for-dev zero-setup pattern):
 
 * :class:`EONETFeed` — NASA EONET open natural events (wildfires, storms,
   volcanoes, floods, ice, drought…), already GeoJSON.
 * :class:`USGSFeed`  — USGS significant earthquakes, already GeoJSON; magnitude
   maps to the red/orange/green severity the deck colours by.
+* :class:`GDACSFeed` — GDACS global alerts (RSS); ``georss:point`` coordinates and
+  native green/orange/red alert levels that map 1:1 to our severity words.
+* :class:`UKFloodFeed` / :class:`MetOfficeFeed` — UK Environment-Agency floods and
+  Met Office severe-weather warnings; :class:`IMGWFeed` — Poland meteo + hydro.
 
 When ``SUPER_MENU_OFFLINE`` is set, or every live feed fails, collection falls
 back to the last good disk cache and then a packaged seed snapshot, so the plugin
@@ -27,9 +31,11 @@ import os
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Optional
 
@@ -53,12 +59,14 @@ CATEGORY_RADIUS_KM = {"wildfire": 30, "storm": 100, "volcano": 50, "flood": 40,
 # deck colours by (both forms are accepted on the frontend).
 SEV_WORD = {1: "green", 2: "orange", 3: "red"}
 
-_CACHE_TTL_S = 15 * 60  # a scan is "fresh" for 15 min; older → refetch, keep as fallback
+_CACHE_TTL_S = 15 * 60  # a scan is "fresh" for 15 min; younger → served from cache
+_FEED_CACHE_TTL_S = 3 * 3600  # a single failed feed backfills from its last-good for 3 h
 
 # Regional-warning footprints are area-wide, not pinpoint — a UK flood-warning
 # reach or a Polish voivodeship — so their avoid radius is set per feed rather
 # than by the point-hazard category default above.
 UK_FLOOD_RADIUS_KM = 10.0
+UK_WARNING_RADIUS_KM = 60.0
 PL_REGION_RADIUS_KM = 70.0
 
 # Poland's 16 voivodeships, keyed by their TERYT two-digit code, with a rough
@@ -74,6 +82,22 @@ PL_VOIVODESHIPS: dict[str, tuple[str, float, float]] = {
     "22": ("pomorskie", 54.20, 18.00), "24": ("śląskie", 50.30, 19.00),
     "26": ("świętokrzyskie", 50.80, 20.60), "28": ("warmińsko-mazurskie", 53.90, 20.60),
     "30": ("wielkopolskie", 52.40, 17.00), "32": ("zachodniopomorskie", 53.50, 15.50),
+}
+
+# UK Met Office public-weather-service warning regions: code → (name, centroid).
+# There is one RSS feed per region and the warnings carry no coordinates, so —
+# exactly like IMGW places a Polish warning at its voivodeship centroid — each UK
+# warning is pinned to its region's centroid. Same 16-region shape as Poland.
+UK_REGIONS: dict[str, tuple[str, float, float]] = {
+    "os": ("Orkney & Shetland", 59.50, -2.90), "he": ("Highlands & Eilean Siar", 57.50, -5.00),
+    "gr": ("Grampian", 57.20, -2.60), "st": ("Strathclyde", 55.80, -4.60),
+    "ta": ("Central, Tayside & Fife", 56.30, -3.40),
+    "dg": ("Dumfries, Galloway, Lothian & Borders", 55.30, -3.40),
+    "ni": ("Northern Ireland", 54.60, -6.70), "ne": ("North East England", 54.90, -1.70),
+    "nw": ("North West England", 54.00, -2.70), "yh": ("Yorkshire & Humber", 53.80, -1.30),
+    "wm": ("West Midlands", 52.50, -2.20), "em": ("East Midlands", 52.90, -1.00),
+    "ee": ("East of England", 52.20, 0.50), "sw": ("South West England", 50.90, -3.60),
+    "se": ("London & South East England", 51.30, -0.30), "wl": ("Wales", 52.40, -3.80),
 }
 
 
@@ -431,6 +455,137 @@ def _pl_category(event: str, hydro: bool) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# GDACS — Global Disaster Alert and Coordination System (keyless RSS)
+# --------------------------------------------------------------------------- #
+
+class GDACSFeed(HazardFeed):
+    """Global multi-hazard alerts from gdacs.org.
+
+    An RSS feed (parsed with the stdlib ``xml.etree``) where each item already
+    carries a ``georss:point`` and a ``gdacs:alertlevel`` of Green/Orange/Red —
+    which is exactly our stored 1/2/3 severity — plus a ``gdacs:eventtype`` code.
+    GDACS overlaps EONET (storms/volcanoes/floods) and USGS (quakes) on the same
+    big events; we deliberately **don't dedup** — a second authority corroborating
+    an event is signal, and the command's severity cap already bounds the map —
+    but that's the obvious first lever if the deck ever feels noisy.
+    """
+
+    name = "GDACS"
+
+    URL = "https://www.gdacs.org/xml/rss.xml"
+
+    # GDACS event-type code → our vocabulary. TS (tsunami) has no category of its
+    # own; it lands on "other" (still drawn, generic marker).
+    _TYPE = {"EQ": "earthquake", "TC": "storm", "FL": "flood", "VO": "volcano",
+             "DR": "drought", "WF": "wildfire", "TS": "other"}
+    _ALERT = {"green": 1, "orange": 2, "red": 3}
+
+    def fetch(self, days: int, timeout: float) -> list[Hazard]:
+        root = _get_xml(self.URL, timeout)
+        out: list[Hazard] = []
+        for item in _rss_items(root):
+            latlng = _parse_latlng(_child_text(item, "point"))  # georss:point "lat lng"
+            if latlng is None:
+                continue
+            lat, lng = latlng
+            etype = (_child_text(item, "eventtype") or "").strip()
+            cat = self._TYPE.get(etype, "other")
+            alert = (_child_text(item, "alertlevel") or "").strip().lower()
+            title = (_child_text(item, "title") or _child_text(item, "eventname")
+                     or cat.title())
+            out.append(Hazard(
+                title=title.strip(),
+                category=cat,
+                severity=self._ALERT.get(alert, 2),
+                source=self.name,
+                geometry={"type": "Point", "coordinates": [lng, lat]},
+                date=_iso_rfc822(_child_text(item, "pubDate")),
+                radius_km=CATEGORY_RADIUS_KM[cat],
+                extra={k: v for k, v in (
+                    ("event_url", _child_text(item, "link")),
+                    ("alert_level", alert or None),
+                    ("country", _child_text(item, "country")),
+                    ("event_type", etype or None)) if v},
+            ))
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# UK — Met Office severe-weather warnings (keyless public RSS)
+# --------------------------------------------------------------------------- #
+
+class MetOfficeFeed(HazardFeed):
+    """UK Met Office severe-weather warnings (public-weather-service RSS).
+
+    One RSS feed per region (:data:`UK_REGIONS`); the warnings carry no
+    coordinates, so — mirroring :class:`IMGWFeed` — each is placed at its region's
+    centroid. Severity is the warning colour parsed from the headline
+    (red 3 · amber 2 · yellow 1) and category is the hazard keyword. Regions are
+    polled independently and one failing is tolerated, like IMGW's two endpoints;
+    the feed only errors out if *every* region fails (so a real outage still
+    backfills from cache rather than looking like a quiet day).
+    """
+
+    name = "MetOffice"
+
+    BASE = "https://www.metoffice.gov.uk/public/data/PWSCache/WarningsRSS/Region"
+
+    _COLOUR = {"red": 3, "amber": 2, "yellow": 1}
+
+    def fetch(self, days: int, timeout: float) -> list[Hazard]:
+        # Regional feeds are tiny; cap each request so one slow region can't
+        # dominate the whole scan's time budget.
+        per_region = min(timeout, 8.0)
+        out: list[Hazard] = []
+        last_error: Optional[Exception] = None
+        ok = 0
+        for code, (region, lat, lng) in UK_REGIONS.items():
+            try:
+                root = _get_xml(f"{self.BASE}/{code}", per_region)
+            except HazardFeedError as exc:
+                last_error = exc
+                continue
+            ok += 1
+            for item in _rss_items(root):
+                title = (_child_text(item, "title") or "").strip()
+                if not title:
+                    continue
+                colour = self._colour(title)
+                out.append(Hazard(
+                    title=f"{title} — {region}",
+                    category=_uk_category(title),
+                    severity=self._COLOUR.get(colour or "", 1),
+                    source=self.name,
+                    geometry={"type": "Point", "coordinates": [lng, lat]},
+                    date=_iso_rfc822(_child_text(item, "pubDate")),
+                    radius_km=UK_WARNING_RADIUS_KM,
+                    extra={k: v for k, v in (
+                        ("region", region), ("colour", colour),
+                        ("event_url", _child_text(item, "link"))) if v},
+                ))
+        if ok == 0 and last_error is not None:
+            raise HazardFeedError(f"all UK regions failed: {last_error}")
+        return out
+
+    @staticmethod
+    def _colour(title: str) -> Optional[str]:
+        t = title.lower()
+        return next((c for c in ("red", "amber", "yellow") if c in t), None)
+
+
+def _uk_category(title: str) -> str:
+    """Map a Met Office warning headline to the shared category vocabulary."""
+    t = title.lower()
+    if any(k in t for k in ("snow", "ice", "icy")):
+        return "ice"
+    if any(k in t for k in ("thunder", "lightning", "wind", "storm", "gale")):
+        return "storm"
+    if any(k in t for k in ("rain", "flood")):
+        return "flood"
+    return "other"                 # fog, extreme heat, …
+
+
+# --------------------------------------------------------------------------- #
 # Offline seed (deterministic; default when SUPER_MENU_OFFLINE or all feeds fail)
 # --------------------------------------------------------------------------- #
 
@@ -463,41 +618,73 @@ def load_seed() -> list[Hazard]:
 # --------------------------------------------------------------------------- #
 
 def active_feeds() -> list[HazardFeed]:
-    """The feeds this run will poll: two global sources (EONET, USGS) plus the
-    UK and Poland regional feeds. Offline (env flag) ⇒ just the seed; a
-    module-level seam so tests can swap in a fake feed."""
+    """The feeds this run will poll: three global sources (EONET, USGS, GDACS)
+    plus the UK (EA floods, Met Office) and Poland (IMGW) regional feeds. Offline
+    (env flag) ⇒ just the seed; a module-level seam so tests can swap in a fake
+    feed."""
     if os.environ.get("SUPER_MENU_OFFLINE"):
         return [SeedFeed()]
-    return [EONETFeed(), USGSFeed(), UKFloodFeed(), IMGWFeed()]
+    return [EONETFeed(), USGSFeed(), GDACSFeed(),
+            UKFloodFeed(), MetOfficeFeed(), IMGWFeed()]
 
 
-def collect(days: int = 30, timeout: float = 20.0) -> dict:
+def collect(days: int = 30, timeout: float = 20.0, force: bool = False) -> dict:
     """Poll every active feed, merge, and return a bundle:
 
     ``{hazards: [Hazard], sources: [str], live: bool, errors: {feed: msg},
        fetched_at: iso, from_cache: bool}``.
 
-    One feed failing is tolerated (its error is recorded); if *every* live feed
-    fails we fall back to the last good cache, then the packaged seed, so a
-    caller always gets a usable answer offline.
+    Three layers keep this cheap and robust:
+
+    * **Fresh-scan short-circuit** — when a live feed set is active and the last
+      good scan is younger than :data:`_CACHE_TTL_S`, it is served straight from
+      disk, so repeated calls (the deck polling, ``sources`` right after
+      ``active``) don't re-poll every feed. ``force=True`` bypasses it.
+    * **Per-feed backfill** — if one feed fails while others succeed, its hazards
+      are restored from that feed's own last-good cache (within
+      :data:`_FEED_CACHE_TTL_S`) instead of silently vanishing, and the error is
+      still recorded.
+    * **Whole-scan fallback** — if *no* live feed delivers, the last good scan
+      (then the packaged seed) is returned, so a caller always gets a usable
+      answer offline.
     """
     feeds = active_feeds()
+    if not force and any(f.live for f in feeds):
+        fresh = _read_cache(max_age_s=_CACHE_TTL_S)
+        if fresh is not None:
+            return fresh  # a recent live scan — reuse it wholesale, no network
+
+    per_feed = _load_feed_cache()
     hazards: list[Hazard] = []
     sources: list[str] = []
     errors: dict[str, str] = {}
+    backfills: dict[str, list[Hazard]] = {}
     live_any = False
     for feed in feeds:
         try:
             got = feed.fetch(days, timeout)
         except HazardFeedError as exc:
             errors[feed.name] = str(exc)
+            _stage_backfill(per_feed, feed, backfills)
             continue
         except Exception as exc:  # a feed must never take the whole scan down
             errors[feed.name] = f"{type(exc).__name__}: {exc}"
+            _stage_backfill(per_feed, feed, backfills)
             continue
         hazards += got
         sources.append(feed.name)
         live_any = live_any or feed.live
+        if feed.live:  # remember this feed's last-good result for future backfill
+            per_feed[feed.name] = {"fetched_at": _now_iso(),
+                                   "features": [h.to_feature() for h in got]}
+
+    if live_any:
+        _save_feed_cache(per_feed)
+        # A blip on one feed shouldn't erase it while its neighbours succeeded:
+        # restore its last-good hazards and flag the source as cache-served.
+        for name, restored in backfills.items():
+            hazards += restored
+            sources.append(f"{name} (cached)")
 
     if hazards:
         bundle = {"hazards": hazards, "sources": sources, "live": live_any,
@@ -510,6 +697,7 @@ def collect(days: int = 30, timeout: float = 20.0) -> dict:
     cached = _read_cache()
     if cached is not None:
         cached["errors"] = errors
+        cached["live"] = False  # a fallback after live feeds failed is degraded
         cached["from_cache"] = True
         return cached
     seed = load_seed()
@@ -517,10 +705,25 @@ def collect(days: int = 30, timeout: float = 20.0) -> dict:
             "errors": errors, "fetched_at": _now_iso(), "from_cache": False}
 
 
+def _stage_backfill(per_feed: dict, feed: HazardFeed,
+                    backfills: dict[str, list[Hazard]]) -> None:
+    """Queue a failed *live* feed's last-good hazards for backfill, if fresh
+    enough. Applied only when some other live feed succeeded (see :func:`collect`)."""
+    if not feed.live:
+        return
+    restored = _feed_backfill(per_feed, feed.name)
+    if restored:
+        backfills[feed.name] = restored
+
+
 # --- disk cache (mirrors free_for_dev's index cache) ----------------------- #
 
 def _cache_path() -> Path:
     return plugin_data_dir(PLUGIN_ID) / "last_scan.json"
+
+
+def _feed_cache_path() -> Path:
+    return plugin_data_dir(PLUGIN_ID) / "feed_last_good.json"
 
 
 def _area_cache_path() -> Path:
@@ -547,6 +750,7 @@ def _write_cache(bundle: dict) -> None:
         "type": "FeatureCollection",
         "fetched_at": bundle["fetched_at"],
         "sources": bundle["sources"],
+        "live": bundle.get("live", True),
         "features": [h.to_feature() for h in bundle["hazards"]],
     }
     try:
@@ -568,9 +772,37 @@ def _read_cache(max_age_s: int = 24 * 3600) -> Optional[dict]:
     except (OSError, json.JSONDecodeError):
         return None
     hazards = [_hazard_from_feature(f, "cache") for f in fc.get("features", [])]
-    return {"hazards": hazards, "sources": fc.get("sources", []), "live": False,
-            "errors": {}, "fetched_at": fc.get("fetched_at") or _now_iso(),
-            "from_cache": True}
+    # Only live scans are ever written, so a fresh short-circuit reports live=True;
+    # the whole-scan fallback path overrides this to False when it degrades to it.
+    return {"hazards": hazards, "sources": fc.get("sources", []),
+            "live": bool(fc.get("live", True)), "errors": {},
+            "fetched_at": fc.get("fetched_at") or _now_iso(), "from_cache": True}
+
+
+# --- per-feed last-good cache (one blip shouldn't erase a feed) ------------- #
+
+def _load_feed_cache() -> dict:
+    """``{feed_name: {"fetched_at": iso, "features": [Feature]}}``."""
+    try:
+        return json.loads(_feed_cache_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_feed_cache(cache: dict) -> None:
+    try:
+        _feed_cache_path().write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _feed_backfill(cache: dict, name: str, max_age_s: int = _FEED_CACHE_TTL_S) -> list[Hazard]:
+    """One feed's last-good hazards, if cached recently enough to still be worth
+    showing when that feed fails this scan. Empty when missing or too stale."""
+    entry = cache.get(name)
+    if not isinstance(entry, dict) or not _within(entry.get("fetched_at"), max_age_s):
+        return []
+    return [_hazard_from_feature(f, name) for f in entry.get("features", [])]
 
 
 # --------------------------------------------------------------------------- #
@@ -607,6 +839,87 @@ def _get_json(url: str, timeout: float) -> dict:
         raise HazardFeedError(f"feed unreachable: {exc.reason}") from exc
     except (ValueError, json.JSONDecodeError) as exc:
         raise HazardFeedError(f"feed sent malformed JSON: {exc}") from exc
+
+
+def _get_xml(url: str, timeout: float) -> ET.Element:
+    """Fetch and parse an RSS/Atom document; :class:`HazardFeedError` on any
+    network or parse failure (the JSON path's XML twin)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "super-menu/0.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        raise HazardFeedError(f"feed returned HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise HazardFeedError(f"feed unreachable: {exc.reason}") from exc
+    try:
+        return ET.fromstring(raw)
+    except ET.ParseError as exc:
+        raise HazardFeedError(f"feed sent malformed XML: {exc}") from exc
+
+
+def _localname(tag) -> str:
+    """Strip an ElementTree ``{namespace}`` prefix, so georss/gdacs children are
+    found by local name regardless of the exact namespace URI."""
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def _rss_items(root: ET.Element):
+    """Every ``<item>`` in an RSS document, namespace-agnostic."""
+    return (el for el in root.iter() if _localname(el.tag) == "item")
+
+
+def _child_text(item: ET.Element, localname: str) -> Optional[str]:
+    """First child of ``item`` with the given local name, its text stripped."""
+    for child in item:
+        if _localname(child.tag) == localname:
+            text = (child.text or "").strip()
+            return text or None
+    return None
+
+
+def _parse_latlng(text: Optional[str]) -> Optional[tuple[float, float]]:
+    """A ``georss:point`` body — 'lat lng' (space- or comma-separated) → (lat, lng)."""
+    if not text:
+        return None
+    parts = text.replace(",", " ").split()
+    if len(parts) < 2:
+        return None
+    try:
+        lat, lng = float(parts[0]), float(parts[1])
+    except ValueError:
+        return None
+    if -90 <= lat <= 90 and -180 <= lng <= 180:
+        return lat, lng
+    return None
+
+
+def _iso_rfc822(value) -> Optional[str]:
+    """RFC-822 ``pubDate`` (e.g. 'Wed, 08 Jul 2026 10:00:00 GMT') → ISO-8601 UTC."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def _within(iso: Optional[str], max_age_s: int) -> bool:
+    """True if ISO-8601 ``iso`` is a parseable time no older than ``max_age_s``."""
+    if not isinstance(iso, str) or not iso:
+        return False
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(tz=timezone.utc) - dt).total_seconds() <= max_age_s
 
 
 def _geometry_centroid(geometry: dict) -> Optional[tuple[float, float]]:
