@@ -81,9 +81,24 @@
 
   /* ---- modules rail ---- */
   #rail { grid-area: rail; min-height: 0; }
-  #rail .in { padding: 16px 12px; overflow-y: auto; }
+  #rail .in { padding: 16px 12px; overflow-y: auto; display: flex; flex-direction: column; }
   .rail-label, .sect { font-family: var(--mono); font-size: 9.5px; color: var(--muted);
     letter-spacing: .28em; margin: 4px 6px 10px; }
+  .rail-top { display: flex; align-items: center; }
+  .rail-top .rail-label { margin: 0 0 0 6px; flex: 1; }
+  #rail-tgl { all: unset; cursor: pointer; color: var(--muted); font-family: var(--mono);
+    font-size: 12px; padding: 2px 8px; margin-bottom: 8px; border: 1px solid transparent; }
+  #rail-tgl:hover { color: var(--cyan); border-color: var(--cyan-dim); }
+  /* collapsed rail — icon strip; main console takes the width */
+  #app.rail-min { grid-template-columns: 62px 1fr; }
+  #app.rail-min #rail .in { padding: 12px 8px; align-items: center; }
+  #app.rail-min .rail-label { display: none; }
+  #app.rail-min .rail-top { justify-content: center; }
+  #app.rail-min .mod { padding: 11px 0; width: 44px; text-align: center; }
+  #app.rail-min .mod .t { justify-content: center; }
+  #app.rail-min .mod .t .ic { font-size: 19px; }
+  #app.rail-min .mod .t .nm, #app.rail-min .mod .t .n, #app.rail-min .mod .d { display: none; }
+  #app.rail-min .mod.active::before { top: 6px; bottom: 6px; }
   .mod { position: relative; padding: 12px 12px 12px 16px; margin-bottom: 8px; cursor: pointer;
     border: 1px solid transparent; transition: .16s;
     clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
@@ -186,6 +201,24 @@
   ul.hud li { padding: 5px 0 5px 18px; position: relative; border-bottom: 1px solid rgba(56,225,255,.05); }
   ul.hud li::before { content: '▸'; position: absolute; left: 2px; color: var(--cyan); }
 
+  /* ---- home quick-launch (shown before any module is picked) ---- */
+  .home { height: 100%; display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+  .home .hint { font-family: var(--mono); font-size: 10px; color: var(--muted);
+    letter-spacing: .14em; }
+  .ql-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px; align-content: start; overflow-y: auto; }
+  .ql { all: unset; display: flex; gap: 11px; align-items: flex-start; padding: 12px 14px;
+    cursor: pointer; border: 1px solid var(--cyan-dim); background: rgba(56,225,255,.03);
+    transition: .15s;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+  .ql:hover { background: var(--cyan-soft); border-color: rgba(56,225,255,.4);
+    box-shadow: 0 0 14px rgba(56,225,255,.12); }
+  .ql .ic { font-size: 17px; line-height: 1.2; flex: none; }
+  .ql b { display: block; font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+    color: var(--cyan); letter-spacing: .04em; }
+  .ql i { display: block; font-style: normal; font-size: 10.5px; color: var(--muted);
+    line-height: 1.4; margin-top: 3px; font-family: var(--disp); letter-spacing: .02em; }
+
   pre.hud { margin: 0; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
   .j-k { color: var(--cyan); } .j-s { color: #b6f0c8; } .j-n { color: var(--amber); }
   .j-b { color: #c8a6ff; } .j-null { color: var(--err); }
@@ -251,18 +284,96 @@
     clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
   .zchip button { all: unset; cursor: pointer; padding: 0 3px; }
   .zchip button:hover { color: #fff; }
-  #tac-run { width: 100%; font-family: var(--disp); font-size: 14px; font-weight: 700;
+  #tac-run, #hz-scan { width: 100%; font-family: var(--disp); font-size: 14px; font-weight: 700;
     letter-spacing: .2em; padding: 11px 0; cursor: pointer; color: #032430; border: none;
     background: linear-gradient(135deg, var(--cyan), #7cf5ff);
     box-shadow: 0 0 22px rgba(56,225,255,.4); text-transform: uppercase; transition: .15s;
     clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
-  #tac-run:hover { filter: brightness(1.12); }
-  #tac-run:disabled { opacity: .55; cursor: wait; }
-  #tac-metrics { display: flex; flex-wrap: wrap; gap: 5px; }
-  #tac-metrics:empty { display: none; }
+  #tac-run:hover, #hz-scan:hover { filter: brightness(1.12); }
+  #tac-run:disabled, #hz-scan:disabled { opacity: .55; cursor: wait; }
+  #tac-metrics, #hz-metrics { display: flex; flex-wrap: wrap; gap: 5px; }
+  #tac-metrics:empty, #hz-metrics:empty { display: none; }
+
+  /* ---- hazard deck (hazard-watch › active) ---- */
+  .hz-cats { display: flex; flex-wrap: wrap; gap: 5px; }
+  .hzchip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono);
+    font-size: 9.5px; font-weight: 600; color: var(--fg); padding: 4px 9px; cursor: pointer;
+    background: rgba(56,225,255,.06); border: 1px solid var(--cyan-dim); transition: .15s;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .hzchip.off { opacity: .35; filter: grayscale(.8); }
+  .hzchip:hover { border-color: rgba(56,225,255,.4); }
+  .hz-list { display: flex; flex-direction: column; gap: 6px; }
+  .ev { padding: 8px 10px 8px 12px; cursor: pointer; border: 1px solid var(--cyan-dim);
+    background: rgba(56,225,255,.03); transition: .15s;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  .ev:hover { background: var(--cyan-soft); }
+  .ev.sel { border-color: var(--cyan); box-shadow: inset 2px 0 0 var(--cyan); }
+  .ev .ti { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700;
+    letter-spacing: .03em; }
+  .ev .ti .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: currentColor; box-shadow: 0 0 8px currentColor; }
+  .ev .meta { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 3px;
+    letter-spacing: .06em; text-transform: uppercase; }
+  #hz-route { width: 100%; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    letter-spacing: .1em; padding: 9px 0; cursor: pointer; color: var(--amber);
+    background: rgba(255,180,84,.07); border: 1px solid rgba(255,180,84,.4);
+    text-transform: uppercase; transition: .15s;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  #hz-route:hover { background: rgba(255,180,84,.16); box-shadow: 0 0 14px rgba(255,180,84,.25); }
+  .hz-pin { display: grid; place-items: center; width: 30px; height: 30px; font-size: 14px;
+    background: rgba(6,13,24,.85); border: 2px solid var(--c, var(--amber)); border-radius: 50%;
+    animation: hzpulse 2s ease-out infinite; }
+  @keyframes hzpulse { 0% { box-shadow: 0 0 0 0 var(--c, var(--amber)); }
+    70% { box-shadow: 0 0 0 14px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   .flow path { stroke-dasharray: 1 12; stroke-linecap: round; animation: flowdash 1.3s linear infinite; }
   @keyframes flowdash { to { stroke-dashoffset: -13; } }
   @media (max-width: 900px) { .tac { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } }
+
+  /* ---- tactical chat (Claude Code overlay on the route map) ---- */
+  .tac-chat { position: absolute; z-index: 1000; top: 10px; right: 10px; width: 300px;
+    max-height: calc(100% - 20px); display: flex; flex-direction: column;
+    background: rgba(6, 13, 24, .93); border: 1px solid var(--cyan-dim); backdrop-filter: blur(6px);
+    box-shadow: 0 0 24px rgba(0, 0, 0, .5);
+    clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+  .tac-chat.hidden { display: none; }
+  .tac-chat .ch-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--cyan-dim); font-family: var(--mono); font-size: 10px;
+    letter-spacing: .14em; color: var(--cyan); text-transform: uppercase; }
+  .tac-chat .ch-head .led { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan); }
+  .tac-chat .ch-min { margin-left: auto; all: unset; cursor: pointer; color: var(--muted);
+    font-size: 16px; line-height: 1; padding: 0 4px; }
+  .tac-chat .ch-min:hover { color: var(--fg); }
+  .tac-chat .ch-msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex;
+    flex-direction: column; gap: 8px; min-height: 90px; }
+  .tac-chat .ch-msgs::-webkit-scrollbar { width: 6px; }
+  .tac-chat .ch-msgs::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
+  .ch-empty { margin: auto; text-align: center; color: var(--muted); font-family: var(--mono);
+    font-size: 10px; line-height: 1.7; letter-spacing: .03em; }
+  .ch-empty b { color: var(--cyan); }
+  .ch-bubble { font-size: 12px; line-height: 1.5; padding: 8px 10px; max-width: 90%;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .ch-bubble.user { align-self: flex-end; color: #04202b; background: var(--cyan); font-weight: 600; }
+  .ch-bubble.assistant { align-self: flex-start; color: var(--fg); background: rgba(56, 225, 255, .08);
+    border: 1px solid var(--cyan-dim); }
+  .ch-bubble.thinking { color: var(--amber); font-style: italic; }
+  .tac-chat .ch-input { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--cyan-dim); }
+  .tac-chat textarea { flex: 1; resize: none; height: 34px; max-height: 110px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--fg); background: rgba(3, 10, 18, .8);
+    border: 1px solid var(--cyan-dim); }
+  .tac-chat textarea:focus { outline: none; border-color: var(--cyan); }
+  .tac-chat .ch-send { width: 36px; flex: none; cursor: pointer; border: none; color: #032430;
+    background: linear-gradient(135deg, var(--cyan), #7cf5ff); font-size: 14px;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+  .tac-chat .ch-send:disabled { opacity: .5; cursor: wait; }
+  .tac-chat-fab { position: absolute; z-index: 1000; top: 10px; right: 10px; display: none;
+    align-items: center; gap: 6px; padding: 8px 12px; cursor: pointer; border: 1px solid var(--cyan);
+    color: var(--cyan); background: rgba(6, 13, 24, .93); font-family: var(--mono); font-size: 10px;
+    letter-spacing: .1em; text-transform: uppercase;
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  .tac-chat-fab.show { display: inline-flex; }
+  .tac-chat-fab:hover { color: var(--fg); border-color: var(--fg); }
 
   /* ---- footer ---- */
   #foot { grid-area: foot; display: flex; align-items: center; gap: 16px; padding: 0 8px;
@@ -299,11 +410,15 @@
   #boot-log .ok { color: var(--ok); }
 
   @media (max-width: 900px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 30px;
+    #app, #app.rail-min { grid-template-columns: 1fr; grid-template-rows: 58px auto 1fr 30px;
       grid-template-areas: 'top' 'rail' 'main' 'foot'; }
-    #rail .in { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
-    .mod { min-width: 190px; margin: 0; }
-    .rail-label { display: none; }
+    #rail .in, #app.rail-min #rail .in { flex-direction: row; gap: 8px; overflow-x: auto;
+      padding: 10px; align-items: stretch; }
+    .mod, #app.rail-min .mod { min-width: 190px; width: auto; margin: 0; text-align: left;
+      padding: 12px 12px 12px 16px; }
+    #app.rail-min .mod .t { justify-content: flex-start; }
+    #app.rail-min .mod .t .nm, #app.rail-min .mod .t .n, #app.rail-min .mod .d { display: revert; }
+    .rail-label, .rail-top { display: none; }
     html, body { overflow: auto; }
   }
 </style>
@@ -328,7 +443,10 @@
   </div></div>
 
   <div id="rail" class="frame"><div class="in">
-    <div class="rail-label">// MODULES</div>
+    <div class="rail-top">
+      <span class="rail-label">// MODULES</span>
+      <button id="rail-tgl" title="collapse modules (Ctrl+B)">⟨⟨</button>
+    </div>
     <div id="mods"></div>
   </div></div>
 
@@ -355,6 +473,7 @@
   <div id="foot">
     <span>SUPER-MENU // LOCAL INSTANCE</span><span class="bar"></span>
     <span><kbd>Ctrl</kbd>+<kbd>K</kbd> COMMAND PALETTE</span>
+    <span><kbd>Ctrl</kbd>+<kbd>B</kbd> MODULES</span>
   </div>
 </div>
 
@@ -425,12 +544,45 @@ function initUI() {
     const el = document.createElement('div');
     el.className = 'mod';
     el.dataset.id = p.id;
-    el.innerHTML = `<div class="t"><span class="ic">${p.icon}</span>${esc(p.name).toUpperCase()}
+    el.title = `${p.name} — ${p.description}`;
+    el.innerHTML = `<div class="t"><span class="ic">${p.icon}</span><span class="nm">${esc(p.name).toUpperCase()}</span>
         <span class="n">${p.commands.length} CMD</span></div>
       <div class="d">${esc(p.description)}</div>`;
     el.onclick = () => selectPlugin(p.id);
     mods.appendChild(el);
   }
+  renderHome();
+}
+
+/* rail collapse — icons only, main console gets the width */
+function setRailMin(min) {
+  document.getElementById('app').classList.toggle('rail-min', min);
+  $('rail-tgl').textContent = min ? '⟩⟩' : '⟨⟨';
+  $('rail-tgl').title = (min ? 'expand' : 'collapse') + ' modules (Ctrl+B)';
+  try { localStorage.setItem('sm-rail-min', min ? '1' : ''); } catch (e) {}
+  // Leaflet needs a nudge when its container is resized by the grid change
+  setTimeout(() => tac.map?.invalidateSize(), 60);
+}
+$('rail-tgl').onclick = () => setRailMin(!document.getElementById('app').classList.contains('rail-min'));
+try { if (localStorage.getItem('sm-rail-min')) setRailMin(true); } catch (e) {}
+
+/* home screen — every command one click away instead of an empty placeholder */
+function renderHome() {
+  const cards = [];
+  for (const p of state.menu.plugins)
+    for (const c of p.commands)
+      cards.push({ p, c });
+  $('out-body').innerHTML = `<div class="home">
+    <div class="hint">// QUICK LAUNCH — PICK A COMMAND, OR PRESS CTRL+K</div>
+    <div class="ql-grid">${cards.map(({ p, c }, i) => `
+      <button class="ql" data-n="${i}">
+        <span class="ic">${p.icon}</span>
+        <span><b>${esc(p.id)} › ${esc(c.name)}</b><i>${esc(c.help)}</i></span>
+      </button>`).join('')}</div></div>`;
+  $('out-body').querySelectorAll('.ql').forEach(el => {
+    const { p, c } = cards[+el.dataset.n];
+    el.onclick = () => selectPlugin(p.id, c.name);
+  });
 }
 
 function selectPlugin(id, cmdName) {
@@ -466,10 +618,17 @@ function buildForm() {
   const form = $('form');
   form.innerHTML = '';
   if (tac.map) { tac.map.remove(); tac.map = null; }   // leaving/re-entering tactical
+  if (hz.map) { hz.map.remove(); hz.map = null; }      // same for the hazard deck
   if (isTactical()) {                                   // the route command IS a map
     $('runrow').style.display = 'none';
     $('out-head').style.display = 'none';
     renderTactical();
+    return;
+  }
+  if (isHazard()) {                                     // so is the threat board
+    $('runrow').style.display = 'none';
+    $('out-head').style.display = 'none';
+    renderHazard();
     return;
   }
   $('out-body').innerHTML = '<div class="placeholder">AWAITING DIRECTIVE<br/>SET PARAMETERS // EXECUTE</div>';
@@ -632,7 +791,12 @@ async function renderGeo(body, geojson) {
    Same execution path as everything else (/api/run); only the input surface
    is a map instead of a form. State survives switching commands. ======== */
 const tac = { map: null, origin: null, dest: null, zones: [], mode: 'origin',
-              layers: [], originPin: null, destPin: null, seq: 0 };
+              layers: [], originPin: null, destPin: null, seq: 0,
+              chatLog: [], chatSession: null, chatBusy: false, chatOpen: true };
+
+// /api/status once, cached — tells us whether the claude CLI is present.
+let _statusP = null;
+const getStatus = () => (_statusP ||= fetch('/api/status').then(r => r.json()).catch(() => ({})));
 
 const tacPin = color => `
   <svg style="filter:drop-shadow(0 0 6px ${color})" width="26" height="34" viewBox="0 0 30 40">
@@ -715,7 +879,138 @@ function renderTactical() {
     zs.forEach(z => tacAddZone(z.lat, z.lng, z.radius_km));
     if (tac.lastGeojson) tacDrawRoute(tac.lastGeojson, false);
     tacMetrics(tac.lastGeojson);
+    tacInitChat(L);
   });
+}
+
+/* ======== chat — Claude Code driving route-avoider on the tactical map.
+   Overlay pane on the map; a route event runs the same tacDrawRoute path and
+   rebuilds the waypoint/zone state so Claude's plan is hand-editable. ======== */
+function tacInitChat(L) {
+  getStatus().then(s => {
+    if (!s || !s.chat) return;             // pane only when the claude CLI is installed
+    const host = $('tac-map');
+    if (!host) return;
+    const fab = document.createElement('button');
+    fab.className = 'tac-chat-fab';
+    fab.textContent = '💬 ASK CLAUDE';
+    const pane = document.createElement('div');
+    pane.className = 'tac-chat';
+    pane.innerHTML = `
+      <div class="ch-head"><span class="led"></span>ASK CLAUDE
+        <button class="ch-min" title="hide">–</button></div>
+      <div class="ch-msgs" id="tac-ch-msgs"></div>
+      <div class="ch-input">
+        <textarea id="tac-ch-input" rows="1" placeholder="ask for a route…"></textarea>
+        <button class="ch-send" id="tac-ch-send" title="send">➤</button>
+      </div>`;
+    host.appendChild(fab);
+    host.appendChild(pane);
+    // keep clicks/scroll inside the pane from reaching the map (dropping pins etc.)
+    L.DomEvent.disableClickPropagation(pane);
+    L.DomEvent.disableScrollPropagation(pane);
+    L.DomEvent.disableClickPropagation(fab);
+
+    if (tac.chatLog.length) tac.chatLog.forEach(m => tacChatBubble(m.role, m.text, false));
+    else $('tac-ch-msgs').innerHTML = '<div class="ch-empty">Try <b>"route from Manchester ' +
+      'to Leeds avoiding Bolton"</b> — Claude plots it here for you to fine-tune.</div>';
+
+    const show = open => { pane.classList.toggle('hidden', !open);
+      fab.classList.toggle('show', !open); tac.chatOpen = open; };
+    show(tac.chatOpen !== false);
+    pane.querySelector('.ch-min').onclick = () => show(false);
+    fab.onclick = () => { show(true); $('tac-ch-input').focus(); };
+
+    const ta = $('tac-ch-input');
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); tacSendChat(); } });
+    ta.addEventListener('input', e => { e.target.style.height = '34px';
+      e.target.style.height = Math.min(e.target.scrollHeight, 110) + 'px'; });
+    $('tac-ch-send').onclick = tacSendChat;
+  });
+}
+
+function tacChatBubble(cls, text, store) {
+  const box = $('tac-ch-msgs');
+  if (!box) return null;
+  box.querySelector('.ch-empty')?.remove();
+  const b = document.createElement('div');
+  b.className = 'ch-bubble ' + cls;
+  b.textContent = text;
+  box.appendChild(b);
+  box.scrollTop = box.scrollHeight;
+  if (store) tac.chatLog.push({ role: cls.includes('user') ? 'user' : 'assistant', text });
+  return b;
+}
+
+/* Rebuild waypoints + avoid zones from the route Claude produced (same shape the
+   renderer draws), so its plan drops straight into the manual controls. */
+function tacSyncFromGeojson(g) {
+  if (tac.originPin) { tac.map.removeLayer(tac.originPin); tac.originPin = null; }
+  if (tac.destPin) { tac.map.removeLayer(tac.destPin); tac.destPin = null; }
+  tac.origin = tac.dest = null;
+  tac.zones.splice(0).forEach(z => tac.map.removeLayer(z.circle));
+  tacZoneChips();
+  let pendingR = null;
+  for (const f of (g.features || [])) {
+    const p = f.properties || {}, geom = f.geometry || {}, c = geom.coordinates;
+    if (p.kind === 'origin' && geom.type === 'Point') tacSetPoint('origin', c[1], c[0], p.label || '');
+    else if (p.kind === 'destination' && geom.type === 'Point') tacSetPoint('destination', c[1], c[0], p.label || '');
+    else if (p.kind === 'avoid' && geom.type === 'Polygon') pendingR = p.radius_km;
+    else if (p.kind === 'avoid' && geom.type === 'Point') {
+      tacAddZone(c[1], c[0], pendingR ?? (tac.radius || 12)); pendingR = null;
+    }
+  }
+}
+
+async function tacSendChat() {
+  const ta = $('tac-ch-input');
+  const msg = ta.value.trim();
+  if (!msg || tac.chatBusy) return;
+  tacChatBubble('user', msg, true);
+  ta.value = ''; ta.style.height = '34px';
+  tac.chatBusy = true; $('tac-ch-send').disabled = true;
+  let assistant = null, text = '', drew = false;
+  try {
+    const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, session_id: tac.chatSession }) });
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i).split('\n').find(l => l.startsWith('data:'));
+        buf = buf.slice(i + 2);
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(5).trim());
+        if (ev.type === 'session') tac.chatSession = ev.session_id;
+        else if (ev.type === 'tool') { if (!assistant) assistant = tacChatBubble('assistant thinking', '◎ plotting route…', false); }
+        else if (ev.type === 'text') {
+          if (!assistant) assistant = tacChatBubble('assistant', '', false);
+          text += ev.text; assistant.className = 'ch-bubble assistant'; assistant.textContent = text;
+        } else if (ev.type === 'route' && ev.geojson) {
+          tac.lastGeojson = ev.geojson; tacSyncFromGeojson(ev.geojson);
+          tacDrawRoute(ev.geojson, true); tacMetrics(ev.geojson); drew = true;
+        } else if (ev.type === 'error') {
+          tacStatus(ev.message || 'claude error', true);
+          if (assistant && !text) { assistant.className = 'ch-bubble assistant'; assistant.textContent = '⚠ ' + (ev.message || 'error'); }
+        } else if (ev.type === 'done') {
+          if (assistant && !text && drew) { assistant.className = 'ch-bubble assistant'; assistant.textContent = '✓ course plotted on the map.'; }
+        }
+        const box = $('tac-ch-msgs'); if (box) box.scrollTop = box.scrollHeight;
+      }
+    }
+  } catch (e) {
+    tacStatus('chat link failure', true);
+  } finally {
+    tac.chatBusy = false;
+    const b = $('tac-ch-send'); if (b) b.disabled = false;
+    if (assistant) tac.chatLog.push({ role: 'assistant', text: assistant.textContent });
+    ta.focus();
+  }
 }
 
 function tacSetMode(m) {
@@ -868,6 +1163,249 @@ function tacStatus(msg, isErr) {
   el.style.color = isErr ? 'var(--err)' : 'var(--ok)';
 }
 
+/* ======== hazard deck — embedded threat board for hazard-watch › active.
+   FRONTEND CONTRACT (backend TBD — emit this and the deck lights up, no UI work):
+   plugin id "hazard-watch" with a command "active" returning kind=geojson, data =
+   FeatureCollection of Point or Polygon features whose properties may carry:
+     title      — display name of the event
+     category   — wildfire | storm | volcano | flood | earthquake | drought | ice | other
+     severity   — red | orange | green (GDACS alert levels; also accepts 1/2/3; default orange)
+     date       — ISO timestamp (optional)
+     source     — feed name, e.g. EONET / GDACS (optional)
+     radius_km  — danger radius for Point hazards (optional; per-category default below)
+   Unknown categories/severities degrade to "other"/orange. Top-level scalar keys on the
+   FeatureCollection (e.g. fetched_at) render as metric chips. Filtering is client-side,
+   so `active` needs no required params. ======== */
+const hz = { map: null, geojson: null, cats: null, minSev: 1, layers: [], shown: [],
+             center: null, zoom: null, region: '', scanSeq: 0 };
+const HZ_ICON = { wildfire: '🔥', storm: '🌀', volcano: '🌋', flood: '🌊', earthquake: '🌍',
+                  drought: '☀️', ice: '🧊', other: '⚠️' };
+const HZ_RADIUS = { wildfire: 30, storm: 100, volcano: 50, flood: 40, earthquake: 50,
+                    drought: 150, ice: 80, other: 25 };
+const HZ_COLOR = { 1: '#3dffa2', 2: '#ffb454', 3: '#ff5470' };
+const isHazard = () => state.plugin?.id === 'hazard-watch' && state.command?.name === 'active';
+
+const hzSev = p => { const s = String(p?.severity ?? '').toLowerCase();
+  return (s.includes('red') || s === '3') ? 3 : (s.includes('green') || s === '1') ? 1 : 2; };
+const hzCat = p => { const c = String(p?.category ?? '').toLowerCase();
+  return HZ_ICON[c] ? c : Object.keys(HZ_ICON).find(k => c.includes(k)) || 'other'; };
+const hzFiltered = () => (hz.geojson?.features || []).filter(f =>
+  hzSev(f.properties) >= hz.minSev && (!hz.cats || hz.cats.has(hzCat(f.properties))));
+
+function renderHazard() {
+  $('out-body').innerHTML = `
+  <div class="tac">
+    <div class="tac-ctl">
+      <div class="sect">// THREAT SCAN</div>
+      <button id="hz-scan">Scan Feeds</button>
+      <div id="hz-metrics"></div>
+      <div class="sect">// REGION</div>
+      <div class="seg3" id="hz-regionseg">
+        <button data-r="">world</button>
+        <button data-r="uk">UK</button>
+        <button data-r="poland">Poland</button>
+        <button data-r="europe">Europe</button>
+      </div>
+      <div class="sect">// SEVERITY</div>
+      <div class="seg3" id="hz-sevseg">
+        <button data-s="1">all</button>
+        <button data-s="2">orange+</button>
+        <button data-s="3">red</button>
+      </div>
+      <div class="sect">// CATEGORIES</div>
+      <div class="hz-cats" id="hz-cats"></div>
+      <div class="sect">// ACTIVE EVENTS</div>
+      <div class="hz-list" id="hz-list"></div>
+      <button id="hz-route" title="drop the visible hazards into route-avoider as avoid zones">⛔ Avoid these in route planner</button>
+      <div id="hz-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></div>
+    </div>
+    <div class="tac-map" id="hz-map"></div>
+  </div>`;
+  document.querySelectorAll('#hz-sevseg button').forEach(b => {
+    b.classList.toggle('active', +b.dataset.s === hz.minSev);
+    b.onclick = () => { hz.minSev = +b.dataset.s;
+      document.querySelectorAll('#hz-sevseg button').forEach(x =>
+        x.classList.toggle('active', x === b));
+      hzDraw(false); };
+  });
+  document.querySelectorAll('#hz-regionseg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.r === hz.region);
+    b.onclick = () => { hz.region = b.dataset.r;
+      document.querySelectorAll('#hz-regionseg button').forEach(x =>
+        x.classList.toggle('active', x === b));
+      hzScan(); };            // region filters server-side before the cap → re-scan
+  });
+  $('hz-scan').onclick = hzScan;
+  $('hz-route').onclick = hzToRoute;
+  hzCatsRender();
+  ensureLeaflet().then(L => {
+    hz.map = L.map('hz-map', { zoomControl: true });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      className: 'stark-tiles',
+      maxZoom: 20, subdomains: 'abcd',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+    }).addTo(hz.map);
+    hz.map.setView(hz.center || [25, 10], hz.zoom || 2);
+    hz.map.on('moveend', () => { hz.center = hz.map.getCenter(); hz.zoom = hz.map.getZoom(); });
+    if (hz.geojson) hzDraw(false); else hzScan();
+  });
+}
+
+async function hzScan() {
+  const btn = $('hz-scan');
+  if (btn) { btn.disabled = true; btn.textContent = 'SCANNING…'; }
+  // Guard overlapping scans (e.g. auto-scan on entry + a fast region click): only
+  // the newest scan may apply its result, so a slow earlier one can't clobber it.
+  const seq = ++hz.scanSeq;
+  let res;
+  try {
+    const params = hz.region ? { region: hz.region } : {};
+    res = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plugin: 'hazard-watch', command: 'active', params }) })
+      .then(r => r.json());
+  } catch (e) { res = { ok: false, summary: 'link failure' }; }
+  if (seq !== hz.scanSeq) return;            // superseded by a newer scan — drop this result
+  if (btn) { btn.disabled = false; btn.textContent = 'Scan Feeds'; }
+  if (!res.ok) { hzStatus(res.summary || 'scan failed', true); return; }
+  hz.geojson = res.data || { type: 'FeatureCollection', features: [] };
+  hz.cats = null;                                       // new data — reset category filter
+  hzStatus('◉ ' + (res.summary || 'scan complete'));
+  hzCatsRender();
+  hzDraw(true);
+}
+
+function hzCatsRender() {
+  const box = $('hz-cats');
+  if (!box) return;
+  const present = [...new Set((hz.geojson?.features || []).map(f => hzCat(f.properties)))];
+  box.innerHTML = present.length ? '' :
+    '<span style="font-family:var(--mono);font-size:9.5px;color:var(--muted)">— awaiting scan</span>';
+  present.forEach(c => {
+    const el = document.createElement('span');
+    el.className = 'hzchip' + (hz.cats && !hz.cats.has(c) ? ' off' : '');
+    el.textContent = `${HZ_ICON[c]} ${c}`;
+    el.onclick = () => {
+      if (!hz.cats) hz.cats = new Set(present);
+      hz.cats.has(c) ? hz.cats.delete(c) : hz.cats.add(c);
+      if (hz.cats.size === present.length) hz.cats = null;   // all on = no filter
+      hzCatsRender(); hzDraw(false);
+    };
+    box.appendChild(el);
+  });
+}
+
+function hzDraw(fit) {
+  if (!hz.map) return;
+  const L = window.L;
+  hz.layers.forEach(l => hz.map.removeLayer(l));
+  hz.layers = [];
+  const feats = hzFiltered();
+  feats.forEach((f, i) => {
+    const p = f.properties || {}, color = HZ_COLOR[hzSev(p)];
+    let layer;
+    if ((f.geometry || {}).type === 'Point') {
+      const [lng, lat] = f.geometry.coordinates;
+      layer = L.marker([lat, lng], { icon: L.divIcon({ className: '',
+        html: `<div class="hz-pin" style="--c:${color}">${HZ_ICON[hzCat(p)]}</div>`,
+        iconSize: [30, 30], iconAnchor: [15, 15] }) });
+    } else {
+      layer = L.geoJSON(f, { style: { color, weight: 2, dashArray: '6 6',
+        fillColor: color, fillOpacity: .12 } });
+    }
+    layer.bindTooltip(p.title || p.name || hzCat(p));
+    layer.on('click', () => hzSelect(i));
+    layer.addTo(hz.map);
+    hz.layers.push(layer);
+  });
+  hzList(feats);
+  hzMetricsRender(feats);
+  if (fit && hz.layers.length) {
+    const b = L.latLngBounds([]);
+    hz.layers.forEach(l => l.getBounds ? b.extend(l.getBounds()) : b.extend(l.getLatLng()));
+    if (b.isValid()) hz.map.fitBounds(b.pad(0.2));
+  }
+}
+
+function hzList(feats) {
+  hz.shown = feats;
+  const box = $('hz-list');
+  if (!box) return;
+  box.innerHTML = feats.length ? '' :
+    '<div style="font-family:var(--mono);font-size:10px;color:var(--muted)">no events match the filters</div>';
+  feats.forEach((f, i) => {
+    const p = f.properties || {}, sev = hzSev(p);
+    const el = document.createElement('div');
+    el.className = 'ev';
+    el.dataset.n = i;
+    el.innerHTML = `<div class="ti" style="color:${HZ_COLOR[sev]}"><span class="dot"></span>
+        <span style="color:var(--fg)">${HZ_ICON[hzCat(p)]} ${esc(p.title || p.name || 'event')}</span></div>
+      <div class="meta">${esc([hzCat(p), ['', 'green', 'orange', 'red'][sev], p.source,
+        String(p.date || '').slice(0, 10)].filter(Boolean).join(' · '))}</div>`;
+    el.onclick = () => hzSelect(i);
+    box.appendChild(el);
+  });
+}
+
+function hzMetricsRender(feats) {
+  const box = $('hz-metrics');
+  if (!box) return;
+  const reds = feats.filter(f => hzSev(f.properties) === 3).length;
+  const skip = new Set(['type', 'features', 'bbox']);
+  const scalars = Object.entries(hz.geojson || {})
+    .filter(([k, v]) => !skip.has(k) && (typeof v === 'string' || typeof v === 'number'));
+  box.innerHTML = `<span class="metric">ACTIVE <b>${feats.length}</b></span>` +
+    (reds ? `<span class="metric" style="color:var(--err)">RED <b>${reds}</b></span>` : '') +
+    scalars.map(([k, v]) =>
+      `<span class="metric">${esc(k.replace(/_/g, ' '))} <b>${esc(String(v))}</b></span>`).join('');
+}
+
+function hzCenter(f) {
+  const g = f.geometry || {};
+  if (g.type === 'Point') return [g.coordinates[1], g.coordinates[0]];
+  const b = window.L.geoJSON(f).getBounds();
+  return b.isValid() ? b.getCenter() : null;
+}
+
+function hzSelect(i) {
+  document.querySelectorAll('#hz-list .ev').forEach(el =>
+    el.classList.toggle('sel', +el.dataset.n === i));
+  document.querySelector(`#hz-list .ev[data-n="${i}"]`)?.scrollIntoView({ block: 'nearest' });
+  const f = hz.shown[i];
+  if (!f) return;
+  const c = hzCenter(f);
+  if (c) hz.map.flyTo(c, Math.max(hz.map.getZoom(), 5), { duration: .7 });
+}
+
+/* the bridge: visible hazards → route-avoider avoid zones. Pure frontend — the
+   zones ride the same tac state renderTactical() restores onto its map. */
+function hzZone(f) {
+  const p = f.properties || {}, g = f.geometry || {};
+  if (g.type === 'Point')
+    return { lat: g.coordinates[1], lng: g.coordinates[0],
+             radius_km: Math.round(p.radius_km || HZ_RADIUS[hzCat(p)]) };
+  const b = window.L.geoJSON(f).getBounds();
+  if (!b.isValid()) return null;
+  const c = b.getCenter();
+  return { lat: c.lat, lng: c.lng,
+           radius_km: Math.min(300, Math.max(5, Math.round(c.distanceTo(b.getNorthEast()) / 1000))) };
+}
+
+function hzToRoute() {
+  if (!state.menu.plugins.some(p => p.id === 'route-avoider')) {
+    hzStatus('route-avoider module offline', true); return; }
+  const zones = hzFiltered().map(hzZone).filter(Boolean);
+  if (!zones.length) { hzStatus('no hazards to avoid — adjust filters', true); return; }
+  tac.zones.push(...zones);
+  selectPlugin('route-avoider', 'route');
+}
+
+function hzStatus(msg, isErr) {
+  const el = $('hz-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isErr ? 'var(--err)' : 'var(--ok)';
+}
+
 /* ======== JSON highlighter ======== */
 function jsonHtml(obj) {
   const raw = JSON.stringify(obj, null, 2);
@@ -910,6 +1448,8 @@ function palOpen() { pal.classList.add('open'); palQ.value = ''; palSel = 0; pal
 function palClose() { pal.classList.remove('open'); }
 document.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palOpen(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault();
+    setRailMin(!document.getElementById('app').classList.contains('rail-min')); }
   else if (e.key === 'Escape') palClose();
   else if (pal.classList.contains('open')) {
     const items = palItems(palQ.value);

@@ -4,8 +4,8 @@
     {
       "name": "route-web",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "super-menu", "web", "--port=8765"],
-      "port": 8765
+      "runtimeArgs": ["run", "--extra", "mcp", "super-menu", "web", "--port=8791"],
+      "port": 8791
     }
   ]
 }

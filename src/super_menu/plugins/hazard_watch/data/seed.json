@@ -1,0 +1,72 @@
+{
+  "type": "FeatureCollection",
+  "note": "Packaged offline snapshot for hazard-watch. Served when SUPER_MENU_OFFLINE=1 or no live feed is reachable. Not live data — a representative demo/test set spanning every category and severity.",
+  "sources": ["seed"],
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-120.52, 38.91]},
+      "properties": {"title": "Mosquito Ridge Fire", "category": "wildfire", "severity": "red", "source": "EONET", "date": "2026-07-07T12:00:00Z", "radius_km": 30}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-55.0, 22.0]},
+      "properties": {"title": "Hurricane Dora", "category": "storm", "severity": "orange", "source": "EONET", "date": "2026-07-06T00:00:00Z", "radius_km": 100}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Polygon", "coordinates": [[[-2.40, 53.50], [-2.10, 53.50], [-2.10, 53.66], [-2.40, 53.66], [-2.40, 53.50]]]},
+      "properties": {"title": "Irwell Valley Flooding", "category": "flood", "severity": "orange", "source": "EONET", "date": "2026-07-08T06:00:00Z"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [142.31, 38.12]},
+      "properties": {"title": "M5.4 - 118km ESE of Ishinomaki, Japan", "category": "earthquake", "severity": "orange", "source": "USGS", "date": "2026-07-08T02:14:00Z", "radius_km": 97, "magnitude": 5.4}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-19.62, 63.63]},
+      "properties": {"title": "Katla Unrest", "category": "volcano", "severity": "red", "source": "EONET", "date": "2026-07-05T09:00:00Z", "radius_km": 50}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-70.68, -33.44]},
+      "properties": {"title": "M6.1 - Valparaiso, Chile", "category": "earthquake", "severity": "red", "source": "USGS", "date": "2026-07-07T18:52:00Z", "radius_km": 110, "magnitude": 6.1}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [36.82, -1.29]},
+      "properties": {"title": "Horn of Africa Drought", "category": "drought", "severity": "orange", "source": "EONET", "date": "2026-06-30T00:00:00Z", "radius_km": 150}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-45.0, 60.5]},
+      "properties": {"title": "Greenland Sea Ice Advisory", "category": "ice", "severity": "green", "source": "EONET", "date": "2026-07-04T00:00:00Z", "radius_km": 80}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [115.09, -8.34]},
+      "properties": {"title": "Mount Agung Ash Emission", "category": "volcano", "severity": "orange", "source": "EONET", "date": "2026-07-06T15:00:00Z", "radius_km": 50}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-98.49, 29.42]},
+      "properties": {"title": "Central Texas Flash Flooding", "category": "flood", "severity": "red", "source": "EONET", "date": "2026-07-08T11:30:00Z", "radius_km": 40}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-0.55462, 53.22002]},
+      "properties": {"title": "Watercourses in the Lincoln area", "category": "flood", "severity": "orange", "source": "EA-Floods", "date": "2026-07-08T07:15:00Z", "radius_km": 10, "severity_label": "Flood Warning", "county": "Lincolnshire", "river": "River Witham, Sincil Dyke"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [16.30, 51.00]},
+      "properties": {"title": "Burze z gradem — dolnośląskie", "category": "storm", "severity": "orange", "source": "IMGW", "date": "2026-07-08T14:00:00Z", "radius_km": 70, "event": "Burze z gradem", "level": "2", "voivodeship": "dolnośląskie"}
+    },
+    {
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [17.00, 52.40]},
+      "properties": {"title": "Susza hydrologiczna — wielkopolskie", "category": "drought", "severity": "green", "source": "IMGW", "date": "2026-05-17T08:45:56", "radius_km": 70, "event": "Susza hydrologiczna", "level": "-1", "voivodeship": "wielkopolskie"}
+    }
+  ]
+}
