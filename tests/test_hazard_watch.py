@@ -302,8 +302,9 @@ _GDACS_RSS = """<?xml version="1.0" encoding="UTF-8"?>
 def test_gdacs_parse_alert_levels_and_types():
     import xml.etree.ElementTree as ET
     root = ET.fromstring(_GDACS_RSS)
+    # Wide window so the look-back filter is a no-op regardless of wall-clock.
     with _patched(feeds, "_get_xml", lambda url, timeout: root):
-        out = GDACSFeed().fetch(days=7, timeout=1)
+        out = GDACSFeed().fetch(days=36500, timeout=1)
     assert len(out) == 2                                  # the point-less item is skipped
     fire = next(h for h in out if h.category == "wildfire")
     quake = next(h for h in out if h.category == "earthquake")
@@ -321,8 +322,30 @@ def test_gdacs_unknown_type_is_other():
     import xml.etree.ElementTree as ET
     root = ET.fromstring(rss)
     with _patched(feeds, "_get_xml", lambda url, timeout: root):
-        out = GDACSFeed().fetch(days=7, timeout=1)
+        out = GDACSFeed().fetch(days=36500, timeout=1)
     assert any(h.category == "other" for h in out)
+
+
+def test_gdacs_respects_days_window():
+    import xml.etree.ElementTree as ET
+    # One item stamped a decade ago, one with no date at all. A narrow window must
+    # drop the old dated item but keep the undated one (could be a current event).
+    rss = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:gdacs="http://www.gdacs.org"
+     xmlns:georss="http://www.georss.org/georss">
+  <channel>
+    <item><title>Ancient flood</title><georss:point>10 10</georss:point>
+      <gdacs:eventtype>FL</gdacs:eventtype><gdacs:alertlevel>Orange</gdacs:alertlevel>
+      <pubDate>Mon, 01 Jan 2001 00:00:00 GMT</pubDate></item>
+    <item><title>Undated storm</title><georss:point>20 20</georss:point>
+      <gdacs:eventtype>TC</gdacs:eventtype><gdacs:alertlevel>Red</gdacs:alertlevel></item>
+  </channel>
+</rss>"""
+    root = ET.fromstring(rss)
+    with _patched(feeds, "_get_xml", lambda url, timeout: root):
+        out = GDACSFeed().fetch(days=7, timeout=1)
+    titles = {h.title for h in out}
+    assert titles == {"Undated storm"}                   # old one trimmed, undated kept
 
 
 # ----- UK Met Office severe-weather feed ----------------------------------- #
@@ -364,6 +387,20 @@ def test_metoffice_all_regions_down_raises():
         except feeds.HazardFeedError:
             return
     raise AssertionError("a total regional outage must raise, not look like a quiet day")
+
+
+def test_metoffice_bails_after_consecutive_failures():
+    """A total outage must stop early, not wait out all 16 regions sequentially."""
+    calls = {"n": 0}
+    def boom(url, timeout):
+        calls["n"] += 1
+        raise feeds.HazardFeedError("region unreachable")
+    with _patched(feeds, "_get_xml", boom):
+        try:
+            MetOfficeFeed().fetch(days=7, timeout=20)
+        except feeds.HazardFeedError:
+            pass
+    assert calls["n"] == MetOfficeFeed._MAX_CONSECUTIVE_FAILS   # bailed, didn't poll all 16
 
 
 def test_metoffice_quiet_day_is_empty_not_error():

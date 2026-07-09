@@ -482,12 +482,20 @@ class GDACSFeed(HazardFeed):
 
     def fetch(self, days: int, timeout: float) -> list[Hazard]:
         root = _get_xml(self.URL, timeout)
+        window_s = max(1, days) * 86400
         out: list[Hazard] = []
         for item in _rss_items(root):
             latlng = _parse_latlng(_child_text(item, "point"))  # georss:point "lat lng"
             if latlng is None:
                 continue
             lat, lng = latlng
+            # Honour the look-back window like the other feeds. GDACS RSS is a
+            # current-alerts feed, so this rarely trims anything; a *dated* item
+            # older than the window is dropped, but an undated one is kept (never
+            # drop a possibly-current long-running event we just can't date).
+            date = _iso_rfc822(_child_text(item, "pubDate"))
+            if date is not None and not _within(date, window_s):
+                continue
             etype = (_child_text(item, "eventtype") or "").strip()
             cat = self._TYPE.get(etype, "other")
             alert = (_child_text(item, "alertlevel") or "").strip().lower()
@@ -499,7 +507,7 @@ class GDACSFeed(HazardFeed):
                 severity=self._ALERT.get(alert, 2),
                 source=self.name,
                 geometry={"type": "Point", "coordinates": [lng, lat]},
-                date=_iso_rfc822(_child_text(item, "pubDate")),
+                date=date,
                 radius_km=CATEGORY_RADIUS_KM[cat],
                 extra={k: v for k, v in (
                     ("event_url", _child_text(item, "link")),
@@ -532,20 +540,32 @@ class MetOfficeFeed(HazardFeed):
 
     _COLOUR = {"red": 3, "amber": 2, "yellow": 1}
 
+    # Bail out of the region loop once this many regions fail back-to-back: a real
+    # outage hits every region the same way, so there's no point waiting out all 16.
+    _MAX_CONSECUTIVE_FAILS = 3
+
     def fetch(self, days: int, timeout: float) -> list[Hazard]:
-        # Regional feeds are tiny; cap each request so one slow region can't
-        # dominate the whole scan's time budget.
-        per_region = min(timeout, 8.0)
+        # 16 regions are polled sequentially, so bound the worst case (a hung host)
+        # three ways: a small per-region cap, an overall wall-clock deadline across
+        # the loop, and an early bail after a run of failures — otherwise a total
+        # outage could burn ~16×cap seconds, well past the scan budget, before the
+        # total-outage raise lets the whole-scan fallback take over.
+        per_region = min(timeout, 4.0)
+        deadline = time.monotonic() + max(timeout, per_region)
         out: list[Hazard] = []
         last_error: Optional[Exception] = None
-        ok = 0
+        ok = consecutive_fails = 0
         for code, (region, lat, lng) in UK_REGIONS.items():
+            if time.monotonic() >= deadline or consecutive_fails >= self._MAX_CONSECUTIVE_FAILS:
+                break
             try:
                 root = _get_xml(f"{self.BASE}/{code}", per_region)
             except HazardFeedError as exc:
                 last_error = exc
+                consecutive_fails += 1
                 continue
             ok += 1
+            consecutive_fails = 0
             for item in _rss_items(root):
                 title = (_child_text(item, "title") or "").strip()
                 if not title:
