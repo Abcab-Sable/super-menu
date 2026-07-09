@@ -257,12 +257,17 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
     proc: subprocess.Popen | None = None
     try:
         proc = subprocess.Popen(
+            # Fold stderr into stdout and drain the single pipe in the loop below.
+            # A separate stderr=PIPE read only *after* the loop can deadlock: if the
+            # child fills the ~64 KB stderr buffer before exiting, it blocks writing
+            # stderr while we block reading stdout that never comes.
             cmd, stdin=subprocess.DEVNULL,  # headless: no stdin, don't stall waiting for it
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_child_env(),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=_child_env(),
             text=True, encoding="utf-8", errors="replace",
         )
         assert proc.stdout is not None
         emitted_error = False
+        last_noise = ""  # tail of non-JSON output (now incl. stderr) for exit errors
         for line in proc.stdout:
             line = line.strip()
             if not line:
@@ -271,7 +276,8 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
             try:
                 obj = json.loads(line)
             except ValueError:
-                continue  # non-JSON chatter (shouldn't happen with stream-json)
+                last_noise = line  # non-JSON chatter, e.g. an error line on stderr
+                continue
             for event in translate_event(obj):
                 event = _maybe_auth_hint(event)
                 emitted_error = emitted_error or event.get("type") == "error"
@@ -289,9 +295,8 @@ def stream_chat(message: str, session_id: str | None) -> Iterator[dict]:
         # Only surface a generic non-zero-exit error if the stream didn't already
         # report a specific one (e.g. the auth failure), to avoid overwriting it.
         if code != 0 and not emitted_error:
-            err = (proc.stderr.read() if proc.stderr else "").strip()
             yield {"type": "error",
-                   "message": err.splitlines()[-1] if err else f"claude exited {code}"}
+                   "message": last_noise or f"claude exited {code}"}
             yield {"type": "done"}
     except Exception as exc:  # never leak a stack trace into the SSE stream
         yield {"type": "error", "message": f"{type(exc).__name__}: {exc}"}

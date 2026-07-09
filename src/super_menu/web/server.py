@@ -129,6 +129,24 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send(404, b"not found", "text/plain")
 
+    def _chat_request_allowed(self) -> bool:
+        """Whether a POST /api/chat may spawn a Claude subprocess (anti-CSRF).
+
+        Requires a JSON Content-Type (a cross-origin `fetch` can only set that by
+        triggering a CORS preflight, which this server doesn't grant) and rejects
+        any `Origin` header that isn't this host. Same-origin browser requests and
+        non-browser clients (curl, no Origin header) pass.
+        """
+        ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        if ctype != "application/json":
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            host = self.headers.get("Host", "")
+            if origin not in (f"http://{host}", f"https://{host}"):
+                return False
+        return True
+
     def do_POST(self) -> None:
         from super_menu.plugins.route_avoider import webserver as ra_web
         from super_menu.plugins.route_avoider.plugin import set_api_key
@@ -136,6 +154,14 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) or b"{}"
         if self.path == "/api/chat":
+            # Unlike /api/run this endpoint spawns a subscription-billed `claude`
+            # subprocess, so guard it against a cross-origin drive-by (CSRF). The
+            # JSON Content-Type requirement forces a CORS preflight for cross-origin
+            # callers — which this server never answers — defeating a `text/plain`
+            # "simple request", and any Origin header must match this host.
+            if not self._chat_request_allowed():
+                self._send(403, b"forbidden", "text/plain")
+                return
             try:
                 body = json.loads(raw)
             except ValueError:
@@ -164,6 +190,13 @@ def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) ->
     url = f"http://{host}:{port}/"
     n = len(default_registry().plugins)
     print(f"super-menu dashboard → {url}  ({n} plugins · route planner at {url}route · Ctrl+C to stop)")
+    if host not in ("127.0.0.1", "localhost", "::1") and chat.claude_available():
+        # /api/chat drives the user's Claude subscription; on a non-loopback bind
+        # it becomes reachable as a remote subscription proxy. super-menu is a
+        # single-user local harness — warn rather than expose it silently.
+        print(f"  ⚠  bound to {host} (not loopback): the Ask-Claude chat is reachable "
+              "from the network and drives your Claude subscription. Use 127.0.0.1 unless "
+              "you intend to expose it.")
     if open_browser:
         try:
             webbrowser.open(url)

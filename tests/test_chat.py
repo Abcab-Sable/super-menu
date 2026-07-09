@@ -131,6 +131,29 @@ def test_non_auth_error_passes_through():
     _without_oauth_token(check)
 
 
+def _chat_allowed(headers):
+    # The guard only reads self.headers.get(...), so a bare object with a dict of
+    # headers is enough to exercise it without spinning up an HTTP server.
+    from super_menu.web.server import _Handler
+    fake = type("F", (), {"headers": headers})()
+    return _Handler._chat_request_allowed(fake)
+
+
+def test_chat_guard_allows_same_origin_json():
+    assert _chat_allowed({"Content-Type": "application/json; charset=utf-8",
+                          "Origin": "http://127.0.0.1:8765", "Host": "127.0.0.1:8765"})
+    # non-browser client (no Origin) with a JSON body is fine
+    assert _chat_allowed({"Content-Type": "application/json"})
+
+
+def test_chat_guard_blocks_csrf():
+    # text/plain "simple request" drive-by
+    assert not _chat_allowed({"Content-Type": "text/plain"})
+    # cross-origin, even with a JSON Content-Type
+    assert not _chat_allowed({"Content-Type": "application/json",
+                              "Origin": "http://evil.example", "Host": "127.0.0.1:8765"})
+
+
 if __name__ == "__main__":
     test_mcp_config_launches_super_menu_mcp()
     test_build_command_flags()
@@ -145,4 +168,6 @@ if __name__ == "__main__":
     test_auth_error_becomes_setup_hint()
     test_auth_error_kept_when_token_configured()
     test_non_auth_error_passes_through()
+    test_chat_guard_allows_same_origin_json()
+    test_chat_guard_blocks_csrf()
     print("all chat tests passed")
