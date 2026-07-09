@@ -115,8 +115,10 @@ def _collection(hazards: list[feeds.Hazard], bundle: dict, **extra) -> dict:
 
 
 def _note(bundle: dict) -> str:
-    """Trailing summary annotation for degraded/offline scans."""
-    if bundle.get("from_cache"):
+    """Trailing summary annotation for degraded/offline scans. A *fresh* cache hit
+    (from_cache but still live — the 15-min short-circuit) is real recent data, so
+    it reads clean; only a cache served *because* live feeds failed is 'offline'."""
+    if bundle.get("from_cache") and not bundle.get("live"):
         return "  [offline — showing last cached scan]"
     if not bundle.get("live"):
         return "  [offline seed — no live feed reached; live feeds are keyless]"
@@ -127,14 +129,14 @@ def _note(bundle: dict) -> str:
 
 def cmd_active(category: str | None = None, min_severity: str | None = None,
                region: str | None = None, days: int = 30,
-               limit: int = DEFAULT_LIMIT) -> CommandResult:
+               limit: int = DEFAULT_LIMIT, refresh: bool = False) -> CommandResult:
     if category and category.lower() not in CATEGORIES:
         return CommandResult.err(
             f"unknown category '{category}' — choose one of {', '.join(CATEGORIES)}")
     if region and region.lower() not in REGIONS:
         return CommandResult.err(
             f"unknown region '{region}' — choose one of {', '.join(REGIONS)}")
-    bundle = feeds.collect(days=days)
+    bundle = feeds.collect(days=days, force=refresh)
     matched = _filter(bundle["hazards"], category, min_severity, region)
     hazards = _trim(matched, limit)
     fc = _collection(hazards, bundle, window_days=days)
@@ -203,8 +205,9 @@ def cmd_sources() -> CommandResult:
         "fetched_at": bundle.get("fetched_at"),
         "categories": list(CATEGORIES),
         "severities": list(SEV_WORD.values()),
-        "note": ("Live keyless feeds: NASA EONET + USGS. Set SUPER_MENU_OFFLINE=1 "
-                 "to force the packaged seed."),
+        "note": ("Live keyless feeds: EONET, USGS, GDACS (global); EA floods + "
+                 "Met Office (UK); IMGW (Poland). Set SUPER_MENU_OFFLINE=1 to force "
+                 "the packaged seed."),
     }
     reached = ", ".join(bundle.get("sources", [])) or "none"
     return CommandResult.ok_(data=data, summary=f"feeds reached: {reached}", kind="json")
@@ -234,6 +237,8 @@ class HazardWatchPlugin(Plugin):
                           help="Look back this many days for open events."),
                     Param("limit", type="int", default=DEFAULT_LIMIT,
                           help="Max events (most severe/recent kept)."),
+                    Param("refresh", type="bool", default=False,
+                          help="Bypass the 15-min cache and re-poll every feed now."),
                 ],
             ),
             Command(
